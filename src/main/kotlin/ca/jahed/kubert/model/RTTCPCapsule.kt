@@ -12,42 +12,35 @@ import ca.jahed.rtpoet.rtmodel.sm.RTState
 import ca.jahed.rtpoet.rtmodel.sm.RTStateMachine
 import ca.jahed.rtpoet.rtmodel.sm.RTTransition
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
+import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInt
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInteger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 
-class RTTCPProxy(isServer: Boolean,
-                 slotIndex: Int,
-                 hostEnvVarPrefix: String,
-                 portEnvVarPrefix: String,
-                 proxyPorts: List<RTPort>)
-    : RTCapsule(NameUtils.randomize(RTTCPProxy::class.java.simpleName)) {
-
-    var numBorderPorts = 0
-    var numInternalPorts = 0
+class RTTCPCapsule(isServer: Boolean,
+                   slotIndex: Int,
+                   hostEnvVarPrefix: String,
+                   portEnvVarPrefix: String)
+    : RTCapsule(NameUtils.randomize(RTTCPCapsule::class.java.simpleName)) {
 
     init {
+        attributes.add(RTAttribute.builder("index", RTInteger).build())
         attributes.add(RTAttribute.builder("remoteHost", RTString).build())
         attributes.add(RTAttribute.builder("port", RTInteger).build())
         attributes.add(RTAttribute.builder("isServer", RTBoolean).build())
 
+        ports.add(RTPort.builder("relay", RTRelayProtocol).external().conjugate().build())
         ports.add(RTPort.builder("tcp", RTTCPProtocol).internal().build())
         ports.add(RTPort.builder("tcpServer", RTTCPProtocol).internal().build())
         ports.add(RTPort.builder("timer", RTTimingProtocol).internal().build())
         ports.add(RTPort.builder("log", RTLogProtocol).internal().build())
-        numInternalPorts += 4
-
-        proxyPorts.forEach {
-            if (it.wired && it.service) numBorderPorts++ else numInternalPorts++
-            ports.add(it)
-        }
 
         operations.add(RTOperation.builder("getPort")
             .ret(RTParameter.builder(RTInteger))
             .action(RTAction.builder("""
-                int hostIndex = this->isServer ? ${slotIndex} : this->getIndex();
+                int hostIndex = this->isServer ? ${slotIndex} : this->index;
                 int hostIndexLength = hostIndex > 0 ? floor(log10(abs(hostIndex))) + 1 : 1;
 
-                int portIndex = this->isServer ? this->getIndex() : ${slotIndex};
+                int portIndex = this->isServer ? this->index : ${slotIndex};
                 int portIndexLength = portIndex > 0 ? floor(log10(abs(portIndex))) + 1 : 1;
 
                 const char * hostEnvVarPrefix = "${hostEnvVarPrefix}";
@@ -67,7 +60,7 @@ class RTTCPProxy(isServer: Boolean,
         operations.add(RTOperation.builder("getHost")
             .ret(RTParameter.builder(RTString))
             .action(RTAction.builder("""
-                int hostIndex = this->getIndex();
+                int hostIndex = this->index;
                 int hostIndexLength = hostIndex > 0 ? floor(log10(abs(hostIndex))) + 1 : 1;
 
                 const char * hostEnvVarPrefix = "${hostEnvVarPrefix}";
@@ -101,24 +94,8 @@ class RTTCPProxy(isServer: Boolean,
             .build()
         )
 
-        operations.add(RTOperation.builder("recallAll")
-            .action(RTAction.builder("""
-                for(int i=0; i<${numBorderPorts}; i++) {
-                    borderPorts[i]->recall();
-                }
-
-                for(int i=0; i<${numInternalPorts}; i++) {
-                    if(internalPorts[i]->sap && !internalPorts[i]->automatic)
-                        UMLRTProtocol::registerSapPort(internalPorts[i], internalPorts[i]->registrationOverride);
-                    internalPorts[i]->recall();
-                }
-            """.trimIndent()))
-            .build()
-        )
-
         properties = RTCapsuleProperties.builder().implementationPreface("""
             #include <math.h>
-            #include "umlrtjsoncoder.hh"
         """.trimIndent()).build()
 
         stateMachine = RTStateMachine.builder()
@@ -129,6 +106,7 @@ class RTTCPProxy(isServer: Boolean,
 
             .transition(RTTransition.builder("init", "connecting")
                 .action("""
+                    this->index = *((int*) rtdata);
                     this->onInit();
                 """.trimIndent())
             )
@@ -138,7 +116,7 @@ class RTTCPProxy(isServer: Boolean,
                 .action("""
                     if(${Kubert.debug}) log.log("[%s] connected", this->getSlot()->name);
                     if($isServer) tcp.attach(sockfd);
-                    this->recallAll();
+                    relay.recall();
                 """.trimIndent())
             )
 
@@ -162,11 +140,8 @@ class RTTCPProxy(isServer: Boolean,
                 .trigger("tcp", "received")
                 .action("""
                     if(${Kubert.debug}) log.log("[%s] got message %s", this->getSlot()->name, payload);
-                    UMLRTOutSignal signal;
-                    int destPortIdx;
-                    UMLRTJSONCoder::fromJSON(payload, signal, getSlot(), &destPortIdx);
-                    if(${Kubert.debug}) log.log("[%s] decoded signal %s", this->getSlot()->name, signal.getName());
-                    signal.send();  
+                    ${RTExtMessage.name} rtMessage = { strdup(payload) };
+                    relay.relay(rtMessage).send();
                 """.trimIndent())
             )
 
@@ -179,32 +154,24 @@ class RTTCPProxy(isServer: Boolean,
             )
 
             .transition(RTTransition.builder("connected", "connected")
-                .trigger("^(?!tcp|tcpServer|timer|log).*$", "*")
+                .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] got signal %s on port %s", this->getSlot()->name, msg->signal.getName(), msg->signal.getSrcPort()->getName());
-                    char* json = NULL;
-                    UMLRTJSONCoder::toJSON(msg, &json);
-                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, json);
-                    
-                    if(json == NULL)
-                        log.log("[%s] error encoding signal", this->getSlot()->name);
-                    else if(!tcp.send(json))
+                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
+                    if(!tcp.send(rtMessage.payload))
                         log.log("[%s] error sending message", this->getSlot()->name);
                 """.trimIndent())
             )
 
             .transition(RTTransition.builder("connecting", "connecting")
-                .trigger("^(?!tcp|tcpServer|timer|log).*$", "*")
+                .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] deferring signal %s on port %s", this->getSlot()->name, msg->signal.getName(), msg->signal.getSrcPort()->getName());
                     msg->defer();
                 """.trimIndent())
             )
 
             .transition(RTTransition.builder("error", "error")
-                .trigger("^(?!tcp|tcpServer|timer|log).*$", "*")
+                .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] deferring signal %s on port %s", this->getSlot()->name, msg->signal.getName(), msg->signal.getSrcPort()->getName());
                     msg->defer();
                 """.trimIndent())
             )

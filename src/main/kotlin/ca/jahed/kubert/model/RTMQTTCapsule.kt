@@ -3,7 +3,6 @@ package ca.jahed.kubert.model
 import ca.jahed.kubert.Kubert
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.papyrusrt.rts.protocols.RTMQTTProtocol
-import ca.jahed.rtpoet.papyrusrt.rts.protocols.RTTCPProtocol
 import ca.jahed.rtpoet.rtmodel.*
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTCapsuleProperties
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTLogProtocol
@@ -12,51 +11,29 @@ import ca.jahed.rtpoet.rtmodel.sm.RTPseudoState
 import ca.jahed.rtpoet.rtmodel.sm.RTState
 import ca.jahed.rtpoet.rtmodel.sm.RTStateMachine
 import ca.jahed.rtpoet.rtmodel.sm.RTTransition
-import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
+import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInt
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInteger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 
-class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
-    : RTCapsule(NameUtils.randomize(RTMQTTProxy::class.java.simpleName)) {
-
-    var numBorderPorts = 0
-    var numInternalPorts = 0
+class RTMQTTCapsule(pubTopic: String, subTopic: String)
+    : RTCapsule(NameUtils.randomize(RTMQTTCapsule::class.java.simpleName)) {
 
     init {
+        attributes.add(RTAttribute.builder("index", RTInteger).build())
         attributes.add(RTAttribute.builder("host", RTString).build())
         attributes.add(RTAttribute.builder("port", RTInteger).build())
         attributes.add(RTAttribute.builder("pubTopic", RTString).build())
         attributes.add(RTAttribute.builder("subTopic", RTString).build())
 
+        ports.add(RTPort.builder("relay", RTRelayProtocol).external().conjugate().build())
         ports.add(RTPort.builder("mqtt", RTMQTTProtocol).internal().build())
         ports.add(RTPort.builder("timer", RTTimingProtocol).internal().build())
         ports.add(RTPort.builder("log", RTLogProtocol).internal().build())
-        numInternalPorts += 3
-
-        proxyPorts.forEach {
-            if(it.wired && it.service) numBorderPorts++ else numInternalPorts++
-            ports.add(it)
-        }
-
-        operations.add(RTOperation.builder("recallAll")
-            .action(RTAction.builder("""
-                for(int i=0; i<${numBorderPorts}; i++) {
-                    borderPorts[i]->recall();
-                }
-                
-                for(int i=0; i<${numInternalPorts}; i++) {
-                    if(internalPorts[i]->sap && !internalPorts[i]->automatic)
-                        UMLRTProtocol::registerSapPort(internalPorts[i], internalPorts[i]->registrationOverride);
-                    internalPorts[i]->recall();
-                }
-            """.trimIndent()))
-            .build()
-        )
 
         operations.add(RTOperation.builder("getSubTopic")
             .ret(RTParameter.builder(RTString))
             .action(RTAction.builder("""
-                int index = this->getIndex();
+                int index = this->index;
                 int indexLength = index > 0 ? floor(log10(abs(index))) + 1 : 1;
 
                 const char * subTopicTemplate = "${subTopic}";
@@ -71,7 +48,7 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
         operations.add(RTOperation.builder("getPubTopic")
             .ret(RTParameter.builder(RTString))
             .action(RTAction.builder("""
-                int index = this->getIndex();
+                int index = this->index;
                 int indexLength = index > 0 ? floor(log10(abs(index))) + 1 : 1;
 
                 const char * pubTopicTemplate = "${pubTopic}";
@@ -85,7 +62,6 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
 
         properties = RTCapsuleProperties.builder().implementationPreface("""
             #include <math.h>
-            #include "umlrtjsoncoder.hh"
         """.trimIndent()).build()
 
         stateMachine = RTStateMachine.builder()
@@ -98,6 +74,7 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
 
             .transition(RTTransition.builder("init", "connecting")
                 .action("""
+                    this->index = *((int*) rtdata);
                     this->host = "mqtt.${Kubert.namespace}.svc.cluster.local";
                     this->port = 1883;
                     this->pubTopic = this->getPubTopic();
@@ -134,7 +111,7 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
                     return strcmp(payload, "ack") == 0;
                 """.trimIndent())
                 .action("""
-                    this->recallAll();
+                    relay.recall();
                     if(${Kubert.debug}) log.log("[%s] handshake complete", this->getSlot()->name);
                 """.trimIndent())
             )
@@ -158,12 +135,8 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
                 .trigger("mqtt", "received")
                 .action("""
                     if(${Kubert.debug}) log.log("[%s] got message %s", this->getSlot()->name, payload);
-                    UMLRTOutSignal signal;
-                    int destPortIdx;
-                    if(UMLRTJSONCoder::fromJSON(payload, signal, getSlot(), &destPortIdx) != NULL) {
-                        if(${Kubert.debug}) log.log("[%s] decoded signal %s", this->getSlot()->name, signal.getName());
-                        signal.send();  
-                    }
+                    ${RTExtMessage.name} rtMessage = { strdup(payload) };
+                    relay.relay(rtMessage).send();
                 """.trimIndent())
             )
 
@@ -178,15 +151,8 @@ class RTMQTTProxy(pubTopic: String, subTopic: String, proxyPorts: List<RTPort>)
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("^(?!mqtt|timer|log).*$", "*")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] got signal %s on port %s", this->getSlot()->name, msg->signal.getName(), msg->signal.getSrcPort()->getName());
-                    char* json = NULL;
-                    UMLRTJSONCoder::toJSON(msg, &json);
-                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, json);
-                    
-                    if(json == NULL)
-                        log.log("[%s] error encoding signal", this->getSlot()->name);
-                    else 
-                        mqtt.publish(this->pubTopic, json);
+                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
+                    mqtt.publish(this->pubTopic, rtMessage.payload);
                 """.trimIndent())
             )
 

@@ -30,23 +30,33 @@ class RTPartialModel(private val mainSlot: RTSlot):
             }
         })
 
+        classes.add(RTExtMessage)
+        protocols.add(RTRelayProtocol)
         capsules.add(container)
+
+        // create parent proxy if it exists
         if(mainSlot.parent != null &&
             mainSlot.neighbors.contains(mainSlot.parent)) {
             val proxyPart = createProxyPart(mainSlot.parent)
+
+            capsules.add(proxyPart.capsule)
+            proxyPart.capsule.parts.forEach { capsules.add(it.capsule) }
+
             container.parts.add(proxyPart)
             container = proxyPart.capsule
-            capsules.add(container)
         }
 
+        // create main part
         val mainPart = createMainPart(mainSlot)
         container.parts.add(mainPart)
         capsules.add(mainPart.capsule)
 
+        // create proxy parts
         mainSlot.neighbors.forEach {
             if(Pair(it.parent, it.part) !in proxyParts.keys) {
                 val proxyPart = createProxyPart(it)
                 capsules.add(proxyPart.capsule)
+                proxyPart.capsule.parts.forEach { capsules.add(it.capsule) }
 
                 if(it in mainSlot.children) mainPart.capsule.parts.add(proxyPart)
                 else container.parts.add(proxyPart)
@@ -56,7 +66,8 @@ class RTPartialModel(private val mainSlot: RTSlot):
             if(isServer) mainSlot.servicePorts.add(Pair(it.k8sName, Kubert.baseTcpPort + it.position))
         }
 
-        val connectors = mutableSetOf<Pair<RTPort, RTCapsulePart>>()
+        // create proxy connectors
+        val connected = mutableSetOf<Pair<RTPort, RTCapsulePart>>()
         mainSlot.connections.forEach { (port, connections) ->
             connections.filter { it in proxyPorts }.forEach {
                 val destPort = proxyPorts[it]!!
@@ -64,7 +75,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
                 val destPart = proxyParts[Pair(destSlot.parent, destSlot.part)]!!
                 val srcPort = copier.copy(port) as RTPort
 
-                if(srcPort.wired && Pair(destPort, destPart) !in connectors) {
+                if(srcPort.wired && Pair(destPort, destPart) !in connected) {
                     val end1 =
                         if(destSlot in mainSlot.children)
                             RTConnectorEnd(srcPort)
@@ -76,7 +87,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
                         else RTConnectorEnd(destPort, destPart)
 
                     val connector = RTConnector.builder(end1, end2).build()
-                    connectors.add(Pair(destPort, destPart))
+                    connected.add(Pair(destPort, destPart))
 
                     if(destSlot in mainSlot.children) mainPart.capsule.connectors.add(connector)
                     else container.connectors.add(connector)
@@ -97,18 +108,23 @@ class RTPartialModel(private val mainSlot: RTSlot):
     }
 
     private fun createProxyPart(slot: RTSlot): RTCapsulePart {
-        val isServer = mainSlot.k8sName > slot.k8sName
-        val portNameFull = if (isServer) slot.k8sName else mainSlot.k8sName
-        val portName = portNameFull.substring(0, portNameFull.lastIndexOf('-') + 1)
+        val coderPart = createCoderPart(slot)
+        val commPart = createCommPart(slot)
+        coderPart.capsule.parts.add(commPart)
 
-        val hostName = if (isServer) mainSlot.k8sName else slot.k8sName
-        val hostEnvVarPrefix = NameUtils.toLegalEnvVarName(hostName.substring(0, hostName.lastIndexOf('-') + 1))
-        val portEnvVarPrefix = NameUtils.toLegalEnvVarName("_SERVICE_PORT_$portName")
+        val commRelayPort = commPart.capsule.ports.first { it.name == "relay" }
+        commRelayPort.replication = coderPart.replication
 
-//        val slotNameTemplate = "${slot.name.substring(0, slot.name.lastIndexOf('[')+1)}%d${slot.name.substring(slot.name.lastIndexOf(']'))}"
-//        val subTopic = "${mainSlot.name}->${slotNameTemplate}"
-//        val pubTopic = "${slotNameTemplate}->${mainSlot.name}"
+        coderPart.capsule.connectors.add(RTConnector.builder(
+            RTConnectorEnd(coderPart.capsule.ports.first { it.name == "relay" }),
+            RTConnectorEnd(commRelayPort, commPart)
+        ).build())
 
+        proxyParts[Pair(slot.parent, slot.part)] = coderPart
+        return coderPart
+    }
+
+    private fun createCoderPart(slot: RTSlot): RTCapsulePart {
         val ports = mutableListOf<RTPort>()
         mainSlot.getConnectionsWith(slot).forEach {
             val proxyPort = copyPort(it.first)
@@ -117,15 +133,27 @@ class RTPartialModel(private val mainSlot: RTSlot):
             proxyPorts[it] = proxyPort
         }
 
-        val partName = if(slot in mainSlot.children) slot.part.name else NameUtils.randomize(slot.part.name)
-        val proxyPart = RTCapsulePart.builder(partName,
-            RTTCPProxy(isServer, mainSlot.index, hostEnvVarPrefix, portEnvVarPrefix, ports))
-//            RTMQTTProxy(pubTopic, subTopic, ports))
-            .replication(if(slot === mainSlot.parent) 1 else slot.part.replication)
-            .build()
+        val partName = if (slot in mainSlot.children) slot.part.name else NameUtils.randomize(slot.part.name)
+        val replication = if (slot === mainSlot.parent) 1 else slot.part.replication
 
-        proxyParts[Pair(slot.parent, slot.part)] = proxyPart
-        return proxyPart
+        return RTCapsulePart.builder(partName, RTCoderCapsule(ports))
+            .replication(replication)
+            .build()
+    }
+
+    private fun createCommPart(slot: RTSlot): RTCapsulePart {
+        val isServer = mainSlot.k8sName > slot.k8sName
+        val portNameFull = if (isServer) slot.k8sName else mainSlot.k8sName
+        val portName = portNameFull.substring(0, portNameFull.lastIndexOf('-') + 1)
+
+        val hostName = if (isServer) mainSlot.k8sName else slot.k8sName
+        val hostEnvVarPrefix = NameUtils.toLegalEnvVarName(hostName.substring(0, hostName.lastIndexOf('-') + 1))
+        val portEnvVarPrefix = NameUtils.toLegalEnvVarName("_SERVICE_PORT_$portName")
+
+        return RTCapsulePart.builder("communicator",
+            RTTCPCapsule(isServer, mainSlot.index, hostEnvVarPrefix, portEnvVarPrefix))
+            .optional()
+            .build()
     }
 
     private fun copyPort(port: RTPort): RTPort {
