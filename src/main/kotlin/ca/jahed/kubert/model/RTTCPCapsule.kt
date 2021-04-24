@@ -28,7 +28,7 @@ class RTTCPCapsule(isServer: Boolean,
         attributes.add(RTAttribute.builder("port", RTInteger).build())
         attributes.add(RTAttribute.builder("isServer", RTBoolean).build())
 
-        ports.add(RTPort.builder("relay", RTRelayProtocol).external().conjugate().build())
+        ports.add(RTPort.builder("relay", RTRelayProtocol).sap().conjugate().notification().build())
         ports.add(RTPort.builder("tcp", RTTCPProtocol).internal().build())
         ports.add(RTPort.builder("tcpServer", RTTCPProtocol).internal().build())
         ports.add(RTPort.builder("timer", RTTimingProtocol).internal().build())
@@ -48,7 +48,6 @@ class RTTCPCapsule(isServer: Boolean,
                 char * portEnvVar = (char*) malloc(sizeof(char) * (strlen(hostEnvVarPrefix) + hostIndexLength
                         + strlen(portEnvVarPrefix) + portIndexLength + 1));
                 sprintf(portEnvVar, "%s%d%s%d", hostEnvVarPrefix, hostIndex, portEnvVarPrefix, portIndex);
-                if(${Kubert.debug}) log.log("[%s] service port: %s", this->getSlot()->name, portEnvVar);
 
                 int port = atoi(getenv(portEnvVar));
                 free(portEnvVar);
@@ -66,7 +65,6 @@ class RTTCPCapsule(isServer: Boolean,
                 const char * hostEnvVarPrefix = "${hostEnvVarPrefix}";
                 char * hostEnvVar = (char*) malloc(sizeof(char) * (strlen(hostEnvVarPrefix) + hostIndexLength + 14));
                 sprintf(hostEnvVar, "%s%d_SERVICE_HOST", hostEnvVarPrefix, hostIndex);
-                if(${Kubert.debug}) log.log("[%s] service name: %s", this->getSlot()->name, hostEnvVar);
 
                 const char * host = getenv(hostEnvVar);
                 free(hostEnvVar);
@@ -100,13 +98,20 @@ class RTTCPCapsule(isServer: Boolean,
 
         stateMachine = RTStateMachine.builder()
             .state(RTPseudoState.initial("init"))
+            .state(RTState.builder("waitForControllerBind"))
             .state(RTState.builder("connecting"))
             .state(RTState.builder("connected"))
             .state(RTState.builder("error"))
 
-            .transition(RTTransition.builder("init", "connecting")
+            .transition(RTTransition.builder("init", "waitForControllerBind")
                 .action("""
                     this->index = *((int*) rtdata);
+                """.trimIndent())
+            )
+
+            .transition(RTTransition.builder("waitForControllerBind", "connecting")
+                .trigger("relay", "rtBound")
+                .action("""
                     this->onInit();
                 """.trimIndent())
             )
@@ -139,7 +144,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("tcp", "received")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] got message %s", this->getSlot()->name, payload);
+                    if(${Kubert.debug}) log.log("[%s] received message %s", this->getSlot()->name, payload);
                     ${RTExtMessage.name} rtMessage = { strdup(payload) };
                     relay.relay(rtMessage).send();
                 """.trimIndent())

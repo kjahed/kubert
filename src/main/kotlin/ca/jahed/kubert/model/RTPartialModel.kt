@@ -3,15 +3,19 @@ package ca.jahed.kubert.model
 import ca.jahed.kubert.Kubert
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
+import ca.jahed.rtpoet.rtmodel.rts.RTSystemSignal
 import ca.jahed.rtpoet.rtmodel.rts.classes.RTSystemClass
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTSystemProtocol
+import ca.jahed.rtpoet.rtmodel.sm.*
 import ca.jahed.rtpoet.rtmodel.visitors.RTVisitorListener
 import ca.jahed.rtpoet.utils.RTDeepCopier
 
 class RTPartialModel(private val mainSlot: RTSlot):
     RTModel(mainSlot.name, RTCapsulePart(NameUtils.randomize("top"), RTCapsule(NameUtils.randomize("Top")))) {
     private val copier = RTDeepCopier(listOf(RTCapsulePart::class.java, RTConnector::class.java))
-    private var container = top.capsule
+
+    private val controlPortRegistration = NameUtils.randomString(8)
+    private val controllerCapsule = RTControllerCapsule(mainSlot.neighbors.size, controlPortRegistration)
 
     private val proxyParts = mutableMapOf<Pair<RTSlot?, RTCapsulePart>, RTCapsulePart>()
     private val proxyPorts = mutableMapOf<Pair<RTPort, RTSlot>, RTPort>()
@@ -32,9 +36,16 @@ class RTPartialModel(private val mainSlot: RTSlot):
 
         classes.add(RTExtMessage)
         protocols.add(RTRelayProtocol)
-        capsules.add(container)
+        protocols.add(RTControlProtocol)
+        capsules.add(top.capsule)
+        capsules.add(controllerCapsule)
+
+        top.capsule.parts.add(
+            RTCapsulePart.builder("controller", controllerCapsule).build()
+        )
 
         // create parent proxy if it exists
+        var container = top.capsule
         if(mainSlot.parent != null &&
             mainSlot.neighbors.contains(mainSlot.parent)) {
             val proxyPart = createProxyPart(mainSlot.parent)
@@ -104,6 +115,31 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val capsuleCopy = copier.copy(slot.part.capsule) as RTCapsule
         capsuleCopy.parts.clear()
         capsuleCopy.connectors.clear()
+
+        val controlPort = RTPort.builder(NameUtils.randomize("controlPort"), RTControlProtocol).sap()
+            .conjugate().notification().registrationOverride(controlPortRegistration).build()
+        capsuleCopy.ports.add(controlPort)
+
+        capsuleCopy.stateMachine!!.states().filterIsInstance<RTState>().forEach {
+            val entryAction = it.entryAction ?: RTAction()
+            entryAction.body = """
+                ${controlPort.name}.messageProcessed("dummy").send();
+                ${entryAction.body}
+            """.trimIndent()
+            it.entryAction = entryAction
+        }
+
+        val initState = capsuleCopy.stateMachine!!.states()
+            .filterIsInstance<RTPseudoState>().first { it.kind == RTPseudoState.Kind.INITIAL }
+        val initTransition = capsuleCopy.stateMachine!!.transitions().first { it.source == initState }
+
+        val bindingState = RTState.builder(NameUtils.randomize("binding")).build()
+        capsuleCopy.stateMachine!!.states().add(bindingState)
+        initTransition.source = bindingState
+        initTransition.triggers.add(RTTrigger(RTSystemSignal.rtBound(), controlPort))
+
+        val newInitTransition = RTTransition.builder(initState, bindingState).build()
+        capsuleCopy.stateMachine!!.transitions().add(newInitTransition)
         return RTCapsulePart(slot.part.name, capsuleCopy)
     }
 
@@ -112,13 +148,14 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val commPart = createCommPart(slot)
         coderPart.capsule.parts.add(commPart)
 
-        val commRelayPort = commPart.capsule.ports.first { it.name == "relay" }
-        commRelayPort.replication = coderPart.replication
+        val controllerCoderPort = controllerCapsule.ports.first { it.name == "coderPort" }
+        val controllerCommPort = controllerCapsule.ports.first { it.name == "commPort" }
 
-        coderPart.capsule.connectors.add(RTConnector.builder(
-            RTConnectorEnd(coderPart.capsule.ports.first { it.name == "relay" }),
-            RTConnectorEnd(commRelayPort, commPart)
-        ).build())
+        val coderRelayPort = coderPart.capsule.ports.first { it.name == "relay" }
+        val commRelayPort = commPart.capsule.ports.first { it.name == "relay" }
+
+        coderRelayPort.registrationOverride = controllerCoderPort.registrationOverride
+        commRelayPort.registrationOverride = controllerCommPort.registrationOverride
 
         proxyParts[Pair(slot.parent, slot.part)] = coderPart
         return coderPart
