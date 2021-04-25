@@ -11,7 +11,7 @@ import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInteger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 
-class RTControllerCapsule(numNeighbors: Int, controlPortRegistration: String) :
+class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, controlPortRegistration: String) :
     RTCapsule(NameUtils.randomize(RTControllerCapsule::class.java.simpleName)) {
 
     init {
@@ -29,8 +29,8 @@ class RTControllerCapsule(numNeighbors: Int, controlPortRegistration: String) :
 
         ports.add(RTPort.builder("log", RTLogProtocol).internal().build())
 
-        ports.add(RTPort.builder("controlPort", RTControlProtocol)
-            .spp().registrationOverride(controlPortRegistration).build())
+        ports.add(RTPort.builder("controlPort", controlProtocol)
+            .spp().registrationOverride(controlPortRegistration).notification().build())
 
         ports.add(RTPort.builder("coderPort", RTRelayProtocol).spp()
             .registrationOverride(NameUtils.randomString(8)).replication(numNeighbors).build())
@@ -38,40 +38,39 @@ class RTControllerCapsule(numNeighbors: Int, controlPortRegistration: String) :
         ports.add(RTPort.builder("commPort", RTRelayProtocol).spp()
             .registrationOverride(NameUtils.randomString(8)).replication(numNeighbors).build())
 
-        operations.add(RTOperation.builder("saveState")
-            .parameter(RTParameter.builder("state", RTString))
-            .ret(RTParameter.builder(RTBoolean))
-            .action(RTAction.builder("""
-                return true;
-            """.trimIndent()))
-            .build()
-        )
-
-        operations.add(RTOperation.builder("restoreState")
-            .ret(RTParameter.builder(RTString))
-            .action(RTAction.builder("""
-                return "";
-            """.trimIndent()))
-            .build()
-        )
 
         properties = RTCapsuleProperties.builder().headerPreface("""
+            #include "umlrtjsoncoder.hh"
             #include <queue>
         """.trimIndent()).build()
 
         stateMachine = RTStateMachine.builder()
             .state(RTPseudoState.initial("init"))
+            .state(RTState.builder("waitForMainCapsuleBind"))
             .state(RTState.builder("collecting"))
 
-            .transition(RTTransition.builder("init", "collecting").action("""
+            .transition(RTTransition.builder("init", "waitForMainCapsuleBind").action("""
                 if(${Kubert.debug}) log.log("[%s] controller %p starting", this->getSlot()->name, this);
                 this->processing = true;
             """.trimIndent()))
 
-            .transition(RTTransition.builder("collecting", "collecting")
-                .trigger("controlPort", "messageProcessed")
+            .transition(RTTransition.builder("waitForMainCapsuleBind", "collecting")
+                .trigger("controlPort", "rtBound")
                 .action("""
-                    this->saveState((char*)state);
+                    controlPort.initialState().sendAt(msg->sapIndex0());
+                """.trimIndent())
+            )
+
+
+            .transition(RTTransition.builder("collecting", "collecting")
+                .trigger("controlPort", "saveState")
+                .action("""
+                    char* stateJson = NULL;
+                    UMLRTJSONCoder::toJSON(msg, &stateJson);
+                    if(${Kubert.debug}) log.log("[%s] state json @%s", this->getSlot()->name, stateJson);
+                    if(stateJson == NULL)
+                        log.log("[%s] error encoding state", this->getSlot()->name);
+
                     this->processing = false;
 
                     // send out messages

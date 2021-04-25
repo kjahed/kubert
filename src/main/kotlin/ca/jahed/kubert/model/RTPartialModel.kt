@@ -7,20 +7,22 @@ import ca.jahed.rtpoet.rtmodel.rts.RTSystemSignal
 import ca.jahed.rtpoet.rtmodel.rts.classes.RTSystemClass
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTSystemProtocol
 import ca.jahed.rtpoet.rtmodel.sm.*
+import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
 import ca.jahed.rtpoet.rtmodel.visitors.RTVisitorListener
 import ca.jahed.rtpoet.utils.RTDeepCopier
 
 class RTPartialModel(private val mainSlot: RTSlot):
     RTModel(mainSlot.name, RTCapsulePart(NameUtils.randomize("top"), RTCapsule(NameUtils.randomize("Top")))) {
+
     private val copier = RTDeepCopier(listOf(RTCapsulePart::class.java, RTConnector::class.java))
-
-    private val controlPortRegistration = NameUtils.randomString(8)
-    private val controllerCapsule = RTControllerCapsule(mainSlot.neighbors.size, controlPortRegistration)
-
     private val proxyParts = mutableMapOf<Pair<RTSlot?, RTCapsulePart>, RTCapsulePart>()
     private val proxyPorts = mutableMapOf<Pair<RTPort, RTSlot>, RTPort>()
 
     init {
+        classes.add(RTExtMessage)
+        protocols.add(RTRelayProtocol)
+        capsules.add(top.capsule)
+
         copier.addListener(object : RTVisitorListener {
             override fun onVisit(element: RTElement, result: Any) {
                 when(result) {
@@ -34,12 +36,20 @@ class RTPartialModel(private val mainSlot: RTSlot):
             }
         })
 
-        classes.add(RTExtMessage)
-        protocols.add(RTRelayProtocol)
-        protocols.add(RTControlProtocol)
-        capsules.add(top.capsule)
-        capsules.add(controllerCapsule)
+        // create main capsule
+        val mainCapsule = createMainCapsule()
+        val mainCapsuleControlPort = mainCapsule.ports.first { it.protocol is RTControlProtocol }
 
+        // create controller capsule
+        val controlProtocol = mainCapsuleControlPort.protocol
+        val controllerCapsule = RTControllerCapsule(mainSlot.neighbors.size,
+            controlProtocol, mainCapsuleControlPort.registrationOverride)
+
+        capsules.add(mainCapsule)
+        capsules.add(controllerCapsule)
+        protocols.add(controlProtocol)
+
+        // create controller part
         top.capsule.parts.add(
             RTCapsulePart.builder("controller", controllerCapsule).build()
         )
@@ -48,7 +58,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         var container = top.capsule
         if(mainSlot.parent != null &&
             mainSlot.neighbors.contains(mainSlot.parent)) {
-            val proxyPart = createProxyPart(mainSlot.parent)
+            val proxyPart = createProxyPart(mainSlot.parent, controllerCapsule)
 
             capsules.add(proxyPart.capsule)
             proxyPart.capsule.parts.forEach { capsules.add(it.capsule) }
@@ -58,14 +68,13 @@ class RTPartialModel(private val mainSlot: RTSlot):
         }
 
         // create main part
-        val mainPart = createMainPart(mainSlot)
+        val mainPart = RTCapsulePart.builder(mainSlot.part.name, mainCapsule).build()
         container.parts.add(mainPart)
-        capsules.add(mainPart.capsule)
 
         // create proxy parts
         mainSlot.neighbors.forEach {
             if(Pair(it.parent, it.part) !in proxyParts.keys) {
-                val proxyPart = createProxyPart(it)
+                val proxyPart = createProxyPart(it, controllerCapsule)
                 capsules.add(proxyPart.capsule)
                 proxyPart.capsule.parts.forEach { capsules.add(it.capsule) }
 
@@ -111,45 +120,103 @@ class RTPartialModel(private val mainSlot: RTSlot):
         }
     }
 
-    private fun createMainPart(slot: RTSlot): RTCapsulePart {
-        val capsuleCopy = copier.copy(slot.part.capsule) as RTCapsule
+    private fun createMainCapsule(): RTCapsule {
+        val capsuleCopy = copier.copy(mainSlot.part.capsule) as RTCapsule
         capsuleCopy.parts.clear()
         capsuleCopy.connectors.clear()
+        val attributes = capsuleCopy.attributes.map { it }
+        val stateMachine = capsuleCopy.stateMachine!!
+        val states = stateMachine.states().map { it }
 
-        val controlPort = RTPort.builder(NameUtils.randomize("controlPort"), RTControlProtocol).sap()
-            .conjugate().notification().registrationOverride(controlPortRegistration).build()
+        val controlProtocol = RTControlProtocol(capsuleCopy)
+        val controlPort = RTPort.builder(NameUtils.randomize("controlPort"), controlProtocol).sap()
+            .conjugate().notification().registrationOverride(NameUtils.randomString(8)).build()
         capsuleCopy.ports.add(controlPort)
 
-        capsuleCopy.stateMachine!!.states().filterIsInstance<RTState>().forEach {
+        val saveStateParams = mutableListOf("(char*)this->getCurrentStateString()")
+        attributes.filter { it.type !is RTSystemClass }.forEach { saveStateParams.add("this->${it.name}") }
+
+        val disableEntryCodeAttribute =
+            RTAttribute.builder(NameUtils.randomize("disableEntryCodes"), RTBoolean).build()
+        capsuleCopy.attributes.add(disableEntryCodeAttribute)
+
+        states.filterIsInstance<RTState>().forEach {
             val entryAction = it.entryAction ?: RTAction()
             entryAction.body = """
-                ${controlPort.name}.messageProcessed("dummy").send();
-                ${entryAction.body}
+                ${controlPort.name}.saveState(${saveStateParams.joinToString(",")}).send();
+                
+                if(!this->${disableEntryCodeAttribute.name}) {
+                    ${entryAction.body}
+                }
+                
+                this->${disableEntryCodeAttribute.name} = false;
             """.trimIndent()
+
             it.entryAction = entryAction
         }
 
-        val initState = capsuleCopy.stateMachine!!.states()
-            .filterIsInstance<RTPseudoState>().first { it.kind == RTPseudoState.Kind.INITIAL }
-        val initTransition = capsuleCopy.stateMachine!!.transitions().first { it.source == initState }
-
         val bindingState = RTState.builder(NameUtils.randomize("binding")).build()
-        capsuleCopy.stateMachine!!.states().add(bindingState)
-        initTransition.source = bindingState
-        initTransition.triggers.add(RTTrigger(RTSystemSignal.rtBound(), controlPort))
+        val waitingForStateState = RTState.builder(NameUtils.randomize("waitingForState")).build()
+        val restoringStateChoice = RTPseudoState.choice(NameUtils.randomize("stateSelector")).build()
 
-        val newInitTransition = RTTransition.builder(initState, bindingState).build()
-        capsuleCopy.stateMachine!!.transitions().add(newInitTransition)
-        return RTCapsulePart(slot.part.name, capsuleCopy)
+        stateMachine.states().add(bindingState)
+        stateMachine.states().add(waitingForStateState)
+        stateMachine.states().add(restoringStateChoice)
+
+        val initState = stateMachine.states()
+            .filterIsInstance<RTPseudoState>().first { it.kind == RTPseudoState.Kind.INITIAL }
+        val originalInitTrans = stateMachine.transitions().first { it.source == initState }
+        originalInitTrans.source = waitingForStateState
+        originalInitTrans.triggers.add(
+            RTTrigger(controlPort.inputs().first { it.name == "initialState" }, controlPort)
+        )
+
+        stateMachine.transitions().add(
+            RTTransition.builder(initState, bindingState).build()
+        )
+
+        stateMachine.transitions().add(
+            RTTransition.builder(bindingState, waitingForStateState)
+                .trigger(RTTrigger(RTSystemSignal.rtBound(), controlPort)).build()
+        )
+
+        stateMachine.transitions().add(
+            RTTransition.builder(waitingForStateState, restoringStateChoice)
+                .trigger(
+                    RTTrigger.builder(controlPort.inputs().first { it.name == "restoreState" }, controlPort).build()
+                )
+                .action("""
+                    this->${disableEntryCodeAttribute.name} = true;
+                    ${attributes.filter { it.type !is RTSystemClass }.joinToString("\n") {"""
+                        this->${it.name} = _${it.name};
+                    """.trimIndent()}}
+                """.trimIndent())
+                .build()
+        )
+
+        states.filterIsInstance<RTState>().forEach {
+            stateMachine.transitions().add(
+                RTTransition.builder(restoringStateChoice, it)
+                    .guard("""
+                        return strcmp(${controlProtocol.smStateParameterName}, "${it.name}") == 0;
+                    """.trimIndent())
+                    .action("""
+                        if(${Kubert.debug}) printf("[%s] restoring state to ${it.name}", this->getSlot()->name);
+                    """.trimIndent())
+                    .build()
+            )
+        }
+
+        return capsuleCopy
     }
 
-    private fun createProxyPart(slot: RTSlot): RTCapsulePart {
+    private fun createProxyPart(slot: RTSlot, controller: RTCapsule): RTCapsulePart {
         val coderPart = createCoderPart(slot)
         val commPart = createCommPart(slot)
         coderPart.capsule.parts.add(commPart)
 
-        val controllerCoderPort = controllerCapsule.ports.first { it.name == "coderPort" }
-        val controllerCommPort = controllerCapsule.ports.first { it.name == "commPort" }
+        val controllerCoderPort = controller.ports.first { it.name == "coderPort" }
+        val controllerCommPort = controller.ports.first { it.name == "commPort" }
 
         val coderRelayPort = coderPart.capsule.ports.first { it.name == "relay" }
         val commRelayPort = commPart.capsule.ports.first { it.name == "relay" }
