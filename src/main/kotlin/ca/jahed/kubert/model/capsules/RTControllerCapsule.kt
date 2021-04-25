@@ -8,6 +8,7 @@ import ca.jahed.rtpoet.rtmodel.*
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTAttributeProperties
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTCapsuleProperties
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTLogProtocol
+import ca.jahed.rtpoet.rtmodel.rts.protocols.RTTimingProtocol
 import ca.jahed.rtpoet.rtmodel.sm.*
 import ca.jahed.rtpoet.rtmodel.types.RTType
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.*
@@ -15,6 +16,8 @@ import ca.jahed.rtpoet.rtmodel.types.primitivetype.*
 class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, controlPortName: String) :
     RTCapsule(NameUtils.randomize(RTControllerCapsule::class.java.simpleName)) {
     private val stateFileName = NameUtils.randomize("state");
+    private val outQFileName = NameUtils.randomize("outQ");
+
     private val saveStateSignal = controlProtocol.inputSignals.first {it.name == "saveState"}
     private val restoreStateSignal = controlProtocol.outputSignals.first {it.name == "restoreState"}
 
@@ -32,6 +35,7 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
         )
 
         ports.add(RTPort.builder("log", RTLogProtocol).internal().build())
+        ports.add(RTPort.builder("timer", RTTimingProtocol).internal().build())
 
         ports.add(RTPort.builder(controlPortName, controlProtocol).spp().notification().build())
 
@@ -41,7 +45,6 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
         ports.add(RTPort.builder("commPort", RTRelayProtocol).spp()
             .registrationOverride(NameUtils.randomString(8)).replication(numNeighbors).build())
 
-        //TODO: fix hacky replace
         operations.add(RTOperation.builder("saveState")
             .parameter(RTParameter.builder("state", RTString))
             .action(RTAction.builder("""
@@ -64,6 +67,56 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                 }
                 
                 return !state.empty() ? strdup(state.c_str()) : NULL;
+            """.trimIndent()))
+            .build()
+        )
+
+        operations.add(RTOperation.builder("dumpOutQ")
+            .action(RTAction.builder("""
+                UMLRTJSONCoder jsonCoder = UMLRTJSONCoder();
+
+                int qSize = outQ.size();
+                jsonCoder.encode(&${getTypeDescriptor(RTInteger)}, (uint8_t*) &qSize);
+                
+                for(int i=0; i<qSize; i++) {
+                    ${RTExtMessage.name} rtMessage = outQ.front();
+                    jsonCoder.encode(&${getTypeDescriptor(RTExtMessage)}, (uint8_t*) &rtMessage);
+                    
+                    outQ.pop();
+                    outQ.push(rtMessage);
+                }
+                
+                char * json;
+                jsonCoder.commit(&json);
+                                
+                std::ofstream outQFile;
+                outQFile.open("/data/${outQFileName}");
+                outQFile << json;
+                outQFile.close();
+            """.trimIndent()))
+            .build()
+        )
+
+        operations.add(RTOperation.builder("loadOutQ")
+            .action(RTAction.builder("""
+                string json;
+                std::ifstream outQFile("/data/${outQFileName}");
+                if(outQFile.is_open()) {
+                    std::getline(outQFile, json);
+                    outQFile.close();
+                }
+                
+                if(!json.empty()) {
+                    UMLRTJSONCoder jsonCoder = UMLRTJSONCoder(json.c_str());
+                    int qSize;
+                    jsonCoder.decode(&${getTypeDescriptor(RTInteger)}, (uint8_t*) &qSize);
+                    
+                    for(int i=0; i<qSize; i++) {
+                        ${RTExtMessage.name} rtMessage;
+                        jsonCoder.decode(&${getTypeDescriptor(RTExtMessage)}, (uint8_t*) &rtMessage);
+                        outQ.push(rtMessage);
+                    }
+                }
             """.trimIndent()))
             .build()
         )
@@ -93,7 +146,6 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                     if(stateJson == NULL) {
                         ${controlPortName}.initialState().sendAt(msg->sapIndex0());
                     } else {
-                    
                         UMLRTJSONCoder jsonCoder = UMLRTJSONCoder(stateJson);
                         ${restoreStateSignal.parameters.joinToString("\n") { """
                             ${getTypeName(it.type)} ${it.name};
@@ -117,7 +169,7 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                     ${saveStateSignal.parameters.joinToString("\n") { """
                         jsonCoder.encode(&${getTypeDescriptor(it.type)}, (uint8_t*) &${it.name});
                     """.trimIndent() }}
-
+                    
                     char * stateJson;
                     jsonCoder.commit(&stateJson);
                     if(${Kubert.debug}) log.log("[%s] state json @%s", this->getSlot()->name, stateJson);
@@ -125,6 +177,19 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                         log.log("[%s] error encoding state", this->getSlot()->name);
                     else
                         this->saveState(stateJson);
+
+                    this->processing = false;
+                    timer.informIn(UMLRTTimespec(0,0));
+                """.trimIndent())
+            )
+
+            .transition(RTTransition.builder("collecting", "collecting")
+                .trigger("timer", "timeout")
+                .guard("""
+                    return !this->processing;
+                """.trimIndent())
+                .action("""
+                    //this->dumpOutQ();
                     
                     // send out messages
                     while (!outQ.empty()) {
@@ -132,8 +197,6 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                         outQ.pop();
                         commPort.relay(rtMessage).sendAt(rtMessage.srcPortIndex);
                      }
-
-                    this->processing = false;
 
                     // relay next message
                     if(!inQ.empty()) {
@@ -149,12 +212,8 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                 .trigger("commPort", "relay")
                 .action("""
                     ${RTExtMessage.name} rtMessageCpy = { strdup(rtMessage.payload), msg->sapIndex0() };
-                    if(!this->processing) {
-                        coderPort.relay(rtMessageCpy).sendAt(rtMessageCpy.srcPortIndex);
-                        this->processing = true;
-                    } else {
-                        inQ.push(rtMessageCpy);
-                    }
+                    inQ.push(rtMessageCpy);
+                    timer.informIn(UMLRTTimespec(0,0));
                 """.trimIndent())
             )
 
@@ -162,11 +221,8 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                 .trigger("coderPort", "relay")
                 .action("""
                     ${RTExtMessage.name} rtMessageCpy = { strdup(rtMessage.payload), msg->sapIndex0() };
-                    if(!this->processing) {
-                        commPort.relay(rtMessageCpy).sendAt(rtMessageCpy.srcPortIndex);
-                    } else {
-                        outQ.push(rtMessageCpy);
-                    }
+                    outQ.push(rtMessageCpy);
+                    timer.informIn(UMLRTTimespec(0,0));
                 """.trimIndent())
             )
 

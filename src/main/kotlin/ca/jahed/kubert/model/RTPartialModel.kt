@@ -1,17 +1,16 @@
 package ca.jahed.kubert.model
 
 import ca.jahed.kubert.Kubert
-import ca.jahed.kubert.model.capsules.RTCoderCapsule
-import ca.jahed.kubert.model.capsules.RTControllerCapsule
-import ca.jahed.kubert.model.capsules.RTMQTTCapsule
-import ca.jahed.kubert.model.capsules.RTTCPCapsule
+import ca.jahed.kubert.model.capsules.*
 import ca.jahed.kubert.model.classes.RTExtMessage
+import ca.jahed.kubert.model.classes.RTFramePortWrapper
 import ca.jahed.kubert.model.protocols.RTControlProtocol
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
 import ca.jahed.rtpoet.rtmodel.rts.RTSystemSignal
 import ca.jahed.rtpoet.rtmodel.rts.classes.RTSystemClass
+import ca.jahed.rtpoet.rtmodel.rts.protocols.RTFrameProtocol
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTSystemProtocol
 import ca.jahed.rtpoet.rtmodel.sm.*
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
@@ -28,6 +27,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
     init {
         classes.add(RTExtMessage)
         protocols.add(RTRelayProtocol)
+        capsules.add(RTDummyCapsule)
         capsules.add(top.capsule)
 
         copier.addListener(object : RTVisitorListener {
@@ -85,12 +85,20 @@ class RTPartialModel(private val mainSlot: RTSlot):
                 capsules.add(proxyPart.capsule)
                 proxyPart.capsule.parts.forEach { capsules.add(it.capsule) }
 
-                if(it in mainSlot.children) mainPart.capsule.parts.add(proxyPart)
+                if(it in mainSlot.children) mainCapsule.parts.add(proxyPart)
                 else container.parts.add(proxyPart)
             }
 
             val isServer = mainSlot.k8sName > it.k8sName
             if(isServer) mainSlot.servicePorts.add(Pair(it.k8sName, Kubert.baseTcpPort + it.position))
+        }
+
+        // create unconnected children parts
+        mainSlot.children.forEach {
+            if(Pair(it.parent, it.part) !in proxyParts.keys) {
+                val proxyPart = createDummyProxyPart(it)
+                mainCapsule.parts.add(proxyPart)
+            }
         }
 
         // create proxy connectors
@@ -143,6 +151,17 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val saveStateParams = mutableListOf("(char*)this->getCurrentStateString()")
         attributes.filter { it.type !is RTSystemClass }.forEach { saveStateParams.add("this->${it.name}") }
 
+        val frameWrapper = RTFramePortWrapper(mainSlot)
+        classes.add(frameWrapper)
+
+        val framePortWrapperMap = mutableMapOf<RTPort, RTAttribute>() // port -> frame wrapper
+        capsuleCopy.ports.filter { it.protocol is RTFrameProtocol }.forEach {
+            val wrapper = RTAttribute.builder(it.name, frameWrapper).build()
+            capsuleCopy.attributes.add(wrapper)
+            it.name = NameUtils.randomize(it.name)
+            framePortWrapperMap[it] = wrapper
+        }
+
         val disableEntryCodeAttribute =
             RTAttribute.builder(NameUtils.randomize("disableEntryCodes"), RTBoolean).build()
         capsuleCopy.attributes.add(disableEntryCodeAttribute)
@@ -178,7 +197,11 @@ class RTPartialModel(private val mainSlot: RTSlot):
         )
 
         stateMachine.transitions().add(
-            RTTransition.builder(initState, bindingState).build()
+            RTTransition.builder(initState, bindingState).action("""
+                ${framePortWrapperMap.keys.joinToString("\n") { """
+                    ${framePortWrapperMap[it]!!.name}.setPort(&${it.name});
+                """.trimIndent() }}
+            """.trimIndent()).build()
         )
 
         stateMachine.transitions().add(
@@ -216,6 +239,14 @@ class RTPartialModel(private val mainSlot: RTSlot):
         return capsuleCopy
     }
 
+    private fun createDummyProxyPart(slot: RTSlot): RTCapsulePart {
+        val dummyPartBuilder = RTCapsulePart.builder(slot.part.name, RTDummyCapsule).replication(slot.part.replication)
+        if(slot.part.optional) dummyPartBuilder.optional()
+        val dummyPart = dummyPartBuilder.build()
+        proxyParts[Pair(slot.parent, slot.part)] = dummyPart
+        return dummyPart
+    }
+
     private fun createProxyPart(slot: RTSlot, controller: RTCapsule): RTCapsulePart {
         val coderPart = createCoderPart(slot)
         val commPart = createTCPPart(slot)
@@ -246,9 +277,8 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val partName = if (slot in mainSlot.children) slot.part.name else NameUtils.randomize(slot.part.name)
         val replication = if (slot === mainSlot.parent) 1 else slot.part.replication
 
-        return RTCapsulePart.builder(partName, RTCoderCapsule(ports))
-            .replication(replication)
-            .build()
+        val partBuilder = RTCapsulePart.builder(partName, RTCoderCapsule(ports)).replication(replication)
+        return partBuilder.build()
     }
 
     private fun createTCPPart(slot: RTSlot): RTCapsulePart {
