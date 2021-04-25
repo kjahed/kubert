@@ -149,14 +149,13 @@ class RTPartialModel(private val mainSlot: RTSlot):
 
         states.filterIsInstance<RTState>().forEach {
             val entryAction = it.entryAction ?: RTAction()
-            entryAction.body = """
-                ${controlPort.name}.saveState(${saveStateParams.joinToString(",")}).send();
-                
+            entryAction.body = """                
                 if(!this->${disableEntryCodeAttribute.name}) {
                     ${entryAction.body}
                 }
                 
                 this->${disableEntryCodeAttribute.name} = false;
+                ${controlPort.name}.saveState(${saveStateParams.joinToString(",")}).send();
             """.trimIndent()
 
             it.entryAction = entryAction
@@ -219,7 +218,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
 
     private fun createProxyPart(slot: RTSlot, controller: RTCapsule): RTCapsulePart {
         val coderPart = createCoderPart(slot)
-        val commPart = createMQTTPart(slot)
+        val commPart = createTCPPart(slot)
         coderPart.capsule.parts.add(commPart)
 
         val controllerCoderPort = controller.ports.first { it.name == "coderPort" }
