@@ -6,7 +6,6 @@ import ca.jahed.kubert.model.RTSlot
 import ca.jahed.rtpoet.papyrusrt.PapyrusRTWriter
 import ca.jahed.rtpoet.papyrusrt.rts.PapyrusRTLibrary
 import ca.jahed.rtpoet.rtmodel.*
-import ca.jahed.rtpoet.visualizer.RTVisualizer
 import org.eclipse.emf.common.util.URI
 import org.eclipse.emf.ecore.xmi.XMIResource
 import java.io.File
@@ -29,6 +28,7 @@ object ModelTransformer {
         writeToFile(gradlePropertiesFile(), File(Kubert.outputDir, "gradle.properties"))
         writeToFile(gradleRootScript(), File(Kubert.outputDir, "build.gradle"))
         writeToFile(nameSpaceFile(), File(Kubert.outputDir, "namespace.yaml"))
+        writeToFile(volumeFile(), File(Kubert.outputDir, "volume.yaml"))
         writeToFile(rolesFile(), File(Kubert.outputDir, "roles.yaml"))
     }
 
@@ -199,9 +199,16 @@ object ModelTransformer {
                     name: ${slot.k8sName}
                     app: ${Kubert.appName}
                 spec:
+                  volumes:
+                    - name: ${Kubert.namespace}
+                      persistentVolumeClaim:
+                        claimName: ${Kubert.namespace}
                   containers:
                     - name: ${slot.k8sName}
                       image: ${Kubert.dockerRepo}${slot.k8sName}
+                      volumeMounts:
+                        - mountPath: "/data"
+                          name: ${Kubert.namespace}
                       ${
             if (slot.children.isNotEmpty()) """
                       lifecycle:
@@ -323,13 +330,6 @@ object ModelTransformer {
                     file('service.yaml')?.exists()
                 }
         
-                doFirst {
-                    exec {
-                        commandLine 'kubectl', 'delete', '--namespace', '${Kubert.namespace}', 'service', '${slot.k8sName}'
-                        ignoreExitValue true
-                    }
-                }
-        
                 doLast {
                     exec {
                         commandLine 'kubectl', 'apply', '-f', 'service.yaml'
@@ -338,18 +338,11 @@ object ModelTransformer {
                     file('.service').text = '${slot.k8sName}'
                 }
             }
-        
+                    
             task deploy {
-                dependsOn 'publish', 'deployService', ':deployNamespace', ':deployServices', ':deployRoles'
+                dependsOn 'publish', 'deployService', ':deployNamespace', ':deployVolume', ':deployServices', ':deployRoles'
                 inputs.files 'deployment.yaml', '.push'
                 outputs.files '.deployment'
-        
-                doFirst {
-                    exec {
-                        commandLine 'kubectl', 'delete', '--namespace', '${Kubert.namespace}', 'deployment', '${slot.k8sName}'
-                        ignoreExitValue true
-                    }
-                }
         
                 doLast {
                     exec {
@@ -450,6 +443,19 @@ object ModelTransformer {
             
             }
             
+            task deployVolume {
+                inputs.files 'volume.yaml'
+                outputs.files '.volume'
+            
+                doLast {
+                    exec {
+                        commandLine 'kubectl', 'apply', '-f', 'volume.yaml'
+                    }
+            
+                    file('.volume').text = '${Kubert.namespace}'
+                }
+            }
+            
             task deployServices {
             
             }
@@ -475,11 +481,11 @@ object ModelTransformer {
             }
                         
             task tearDown(type:Exec) {
-                commandLine 'kubectl', 'delete', 'namespaces', '${Kubert.namespace}'
+                commandLine 'kubectl', 'delete', 'namespaces,pv,pvc', '${Kubert.namespace}'
                 ignoreExitValue true
             
                 doLast {
-                    delete '.namespace', '.roles'
+                    delete '.namespace', '.roles', '.volume'
                 }
             }
             
@@ -511,6 +517,46 @@ object ModelTransformer {
             kind: Namespace
             metadata:
               name: ${Kubert.namespace}
+        """.trimIndent()
+    }
+
+    private fun volumeFile(): String {
+        return """
+            apiVersion: storage.k8s.io/v1
+            kind: StorageClass
+            metadata:
+              name: ${Kubert.namespace}
+            provisioner: docker.io/hostpath
+            reclaimPolicy: Delete
+            ---
+            apiVersion: v1
+            kind: PersistentVolume
+            metadata:
+              name: ${Kubert.namespace}
+              labels:
+                type: local
+            spec:
+              storageClassName: manual
+              capacity:
+                storage: 1Gi
+              accessModes:
+                - ReadWriteMany
+              hostPath:
+                path: "/mnt/data"
+            ---
+            apiVersion: v1
+            kind: PersistentVolumeClaim
+            metadata:
+              name: ${Kubert.namespace}
+              namespace: ${Kubert.namespace}
+            spec:
+              storageClassName: manual
+              accessModes:
+                - ReadWriteMany
+              resources:
+                requests:
+                  storage: 1Gi
+              storageClassName: ${Kubert.namespace}
         """.trimIndent()
     }
 

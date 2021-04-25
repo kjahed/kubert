@@ -43,7 +43,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         // create controller capsule
         val controlProtocol = mainCapsuleControlPort.protocol
         val controllerCapsule = RTControllerCapsule(mainSlot.neighbors.size,
-            controlProtocol, mainCapsuleControlPort.registrationOverride)
+            controlProtocol, mainCapsuleControlPort.name)
 
         capsules.add(mainCapsule)
         capsules.add(controllerCapsule)
@@ -129,8 +129,8 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val states = stateMachine.states().map { it }
 
         val controlProtocol = RTControlProtocol(capsuleCopy)
-        val controlPort = RTPort.builder(NameUtils.randomize("controlPort"), controlProtocol).sap()
-            .conjugate().notification().registrationOverride(NameUtils.randomString(8)).build()
+        val controlPort = RTPort.builder(NameUtils.randomize("controlPort"), controlProtocol)
+            .sap().conjugate().notification().build()
         capsuleCopy.ports.add(controlPort)
 
         val saveStateParams = mutableListOf("(char*)this->getCurrentStateString()")
