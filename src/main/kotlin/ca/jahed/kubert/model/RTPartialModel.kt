@@ -212,7 +212,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
 
     private fun createProxyPart(slot: RTSlot, controller: RTCapsule): RTCapsulePart {
         val coderPart = createCoderPart(slot)
-        val commPart = createCommPart(slot)
+        val commPart = createMQTTPart(slot)
         coderPart.capsule.parts.add(commPart)
 
         val controllerCoderPort = controller.ports.first { it.name == "coderPort" }
@@ -245,7 +245,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
             .build()
     }
 
-    private fun createCommPart(slot: RTSlot): RTCapsulePart {
+    private fun createTCPPart(slot: RTSlot): RTCapsulePart {
         val isServer = mainSlot.k8sName > slot.k8sName
         val portNameFull = if (isServer) slot.k8sName else mainSlot.k8sName
         val portName = portNameFull.substring(0, portNameFull.lastIndexOf('-') + 1)
@@ -259,6 +259,18 @@ class RTPartialModel(private val mainSlot: RTSlot):
             .optional()
             .build()
     }
+
+    private fun createMQTTPart(slot: RTSlot): RTCapsulePart {
+        val slotNameTemplate = "${slot.name.substring(0, slot.name.lastIndexOf('[')+1)}%d${slot.name.substring(slot.name.lastIndexOf(']'))}"
+        val subTopic = "${mainSlot.name}->${slotNameTemplate}"
+        val pubTopic = "${slotNameTemplate}->${mainSlot.name}"
+
+        return RTCapsulePart.builder("communicator",
+            RTMQTTCapsule(pubTopic, subTopic))
+            .optional()
+            .build()
+    }
+
 
     private fun copyPort(port: RTPort): RTPort {
         val copy = RTPort(port.name, copier.copy(port.protocol) as RTProtocol)

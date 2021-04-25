@@ -16,13 +16,13 @@ object ModelTransformer {
         val hierarchy = RTHierarchy(model)
         val slots = processSlot(hierarchy.top)
 
-//        val mqttDir = File(Kubert.outputDir, "mqtt")
-//        mqttDir.mkdirs()
-//
-//        writeToFile(mqttConfigMap(), File(mqttDir, "configmap.yaml"))
-//        writeToFile(mqttDeployment(), File(mqttDir, "deployment.yaml"))
-//        writeToFile(mqttService(), File(mqttDir, "service.yaml"))
-//        writeToFile(mqttGradleScript(), File(mqttDir, "build.gradle"))
+        val mqttDir = File(Kubert.outputDir, "mqtt")
+        mqttDir.mkdirs()
+
+        writeToFile(mqttConfigMap(), File(mqttDir, "configmap.yaml"))
+        writeToFile(mqttDeployment(), File(mqttDir, "deployment.yaml"))
+        writeToFile(mqttService(), File(mqttDir, "service.yaml"))
+        writeToFile(mqttGradleScript(), File(mqttDir, "build.gradle"))
 
         writeToFile(gradleSettingsFile(slots), File(Kubert.outputDir, "settings.gradle"))
         writeToFile(gradlePropertiesFile(), File(Kubert.outputDir, "gradle.properties"))
@@ -153,13 +153,9 @@ object ModelTransformer {
                 }
             }
             
-            task tearDown(type:Exec) {
-                commandLine 'kubectl', 'delete', '--namespace', '${Kubert.namespace}', 'deployments,services,configmaps', 'mqtt,mosquitto,mosquitto-config'
-                ignoreExitValue true
-        
-                doLast {
-                    delete '.mqtt'
-                }
+            task tearDown {
+                dependsOn ':deleteNamespace'
+                delete '.mqtt'
             }
         """.trimIndent()
     }
@@ -358,16 +354,9 @@ object ModelTransformer {
                 commandLine 'kubectl', 'logs', '--namespace', '${Kubert.namespace}', '--tail', '-1', '-lname=${slot.k8sName}', '-f'
             }
         
-            task tearDown(type:Exec) {
-                commandLine 'kubectl', 'delete', '--namespace', '${Kubert.namespace}', 'deployments,services', '${slot.k8sName}'
-                ignoreExitValue true
-        
-                doLast {
-                    delete '.service', '.deployment'
-                }
-            }
-        
             task deleteImage {
+                dependsOn ':tearDown'
+                
                 doLast {
                     def imageFile = file('.image')
                     if(imageFile.exists()) {
@@ -479,14 +468,29 @@ object ModelTransformer {
                 dependsOn 'deploy'
                 commandLine 'kubectl', 'logs', '--namespace', '${Kubert.namespace}', '--tail', '-1', '--max-log-requests', '1000', '-lapp=${Kubert.appName}'
             }
-                        
-            task tearDown(type:Exec) {
-                commandLine 'kubectl', 'delete', 'namespaces,pv,pvc', '${Kubert.namespace}'
+                   
+            task deleteNamespace(type:Exec) {
+                commandLine 'kubectl', 'delete', 'namespaces', '${Kubert.namespace}'
                 ignoreExitValue true
             
                 doLast {
-                    delete '.namespace', '.roles', '.volume'
+                    delete '.namespace', '.roles'
                 }
+            }
+            
+            task deleteVolume(type:Exec) {
+                dependsOn 'deleteNamespace'
+            
+                commandLine 'kubectl', 'delete', 'pv', '${Kubert.namespace}'
+                ignoreExitValue true
+            
+                doLast {
+                    delete '.volume'
+                }
+            }
+                                    
+            task tearDown {
+                dependsOn 'deleteNamespace', 'deleteVolume'
             }
             
             task pruneImages() {
@@ -496,10 +500,6 @@ object ModelTransformer {
                         ignoreExitValue true
                     }
                 }
-            }
-            
-            clean.doLast {
-                delete '.namespace', '.roles'
             }
             
             subprojects {
