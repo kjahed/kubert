@@ -1,12 +1,11 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.utils
 
+import ca.jahed.kubert.model.RTSlot
 import ca.jahed.rtpoet.rtmodel.RTModel
 import ca.jahed.rtpoet.rtmodel.RTPort
 
-class RTHierarchy(model: RTModel) {
-    val top = buildHierarchy(model)
-
-    private fun buildHierarchy(model: RTModel): RTSlot {
+object RTHierarchyUtils {
+    fun buildHierarchy(model: RTModel): RTSlot {
         val topSlot = RTSlot(model.top, 0)
         val slots: List<RTSlot> = buildHierarchy(topSlot)
         calculatePositions(topSlot)

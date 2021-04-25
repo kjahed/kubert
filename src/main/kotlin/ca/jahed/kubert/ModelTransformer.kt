@@ -1,6 +1,6 @@
 package ca.jahed.kubert
 
-import ca.jahed.kubert.model.RTHierarchy
+import ca.jahed.kubert.utils.RTHierarchyUtils
 import ca.jahed.kubert.model.RTPartialModel
 import ca.jahed.kubert.model.RTSlot
 import ca.jahed.rtpoet.papyrusrt.PapyrusRTWriter
@@ -13,8 +13,8 @@ import java.io.PrintWriter
 
 object ModelTransformer {
     fun transform(model: RTModel) {
-        val hierarchy = RTHierarchy(model)
-        val slots = processSlot(hierarchy.top)
+        val topSlot = RTHierarchyUtils.buildHierarchy(model)
+        val slots = processSlot(topSlot)
 
         val mqttDir = File(Kubert.outputDir, "mqtt")
         mqttDir.mkdirs()

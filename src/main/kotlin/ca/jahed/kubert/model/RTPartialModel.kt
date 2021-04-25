@@ -1,6 +1,13 @@
 package ca.jahed.kubert.model
 
 import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.model.capsules.RTCoderCapsule
+import ca.jahed.kubert.model.capsules.RTControllerCapsule
+import ca.jahed.kubert.model.capsules.RTMQTTCapsule
+import ca.jahed.kubert.model.capsules.RTTCPCapsule
+import ca.jahed.kubert.model.classes.RTExtMessage
+import ca.jahed.kubert.model.protocols.RTControlProtocol
+import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
 import ca.jahed.rtpoet.rtmodel.rts.RTSystemSignal

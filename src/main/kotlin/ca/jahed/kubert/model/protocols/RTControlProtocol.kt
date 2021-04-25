@@ -1,11 +1,10 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.model.protocols
 
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.RTCapsule
 import ca.jahed.rtpoet.rtmodel.RTParameter
 import ca.jahed.rtpoet.rtmodel.RTProtocol
 import ca.jahed.rtpoet.rtmodel.RTSignal
-import ca.jahed.rtpoet.rtmodel.rts.classes.RTCapsuleId
 import ca.jahed.rtpoet.rtmodel.rts.classes.RTSystemClass
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 

@@ -1,7 +1,7 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.model.protocols
 
+import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.utils.NameUtils
-import ca.jahed.rtpoet.papyrusrt.rts.protocols.RTBaseCommProtocol
 import ca.jahed.rtpoet.rtmodel.RTParameter
 import ca.jahed.rtpoet.rtmodel.RTProtocol
 import ca.jahed.rtpoet.rtmodel.RTSignal

@@ -1,6 +1,8 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.model.capsules
 
 import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.model.classes.RTExtMessage
+import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTAttributeProperties

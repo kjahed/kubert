@@ -1,4 +1,4 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.model.classes
 
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.RTAttribute

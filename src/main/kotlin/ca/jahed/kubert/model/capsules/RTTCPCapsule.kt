@@ -1,6 +1,8 @@
-package ca.jahed.kubert.model
+package ca.jahed.kubert.model.capsules
 
 import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.model.classes.RTExtMessage
+import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.papyrusrt.rts.protocols.RTTCPProtocol
 import ca.jahed.rtpoet.rtmodel.*
@@ -12,7 +14,6 @@ import ca.jahed.rtpoet.rtmodel.sm.RTState
 import ca.jahed.rtpoet.rtmodel.sm.RTStateMachine
 import ca.jahed.rtpoet.rtmodel.sm.RTTransition
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
-import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInt
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInteger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 
