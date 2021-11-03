@@ -162,11 +162,11 @@ object ModelTransformer {
 
     private fun dockerFile(model: RTModel): String {
         return """
-            FROM ${Kubert.dockerRepo}umlrt-rts:latest
+            FROM ${Kubert.dockerRepo}umlrt-rts:1.0
             COPY ./cpp/src /app
             WORKDIR /app
             RUN make
-            ENTRYPOINT flock -n /var/lock/app.lock /app/${model.top.capsule.name}Main ${Kubert.umlrtArgs} 2>&1 | tee logfile
+            ENTRYPOINT flock -n /var/lock/app.lock /app/${model.top!!.capsule.name}Main ${Kubert.umlrtArgs} 2>&1 | tee logfile
         """.trimIndent()
     }
 

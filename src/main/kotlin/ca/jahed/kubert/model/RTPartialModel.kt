@@ -5,6 +5,7 @@ import ca.jahed.kubert.model.capsules.*
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.classes.RTFramePortWrapper
 import ca.jahed.kubert.model.protocols.RTControlProtocol
+import ca.jahed.kubert.model.protocols.RTTimingProtocol
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
@@ -28,7 +29,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         classes.add(RTExtMessage)
         protocols.add(RTRelayProtocol)
         capsules.add(RTDummyCapsule)
-        capsules.add(top.capsule)
+        capsules.add(top!!.capsule)
 
         copier.addListener(object : RTVisitorListener {
             override fun onVisit(element: RTElement, result: Any) {
@@ -57,12 +58,12 @@ class RTPartialModel(private val mainSlot: RTSlot):
         protocols.add(controlProtocol)
 
         // create controller part
-        top.capsule.parts.add(
+        top!!.capsule.parts.add(
             RTCapsulePart.builder("controller", controllerCapsule).build()
         )
 
         // create parent proxy if it exists
-        var container = top.capsule
+        var container = top!!.capsule
         if(mainSlot.parent != null &&
             mainSlot.neighbors.contains(mainSlot.parent)) {
             val proxyPart = createProxyPart(mainSlot.parent, controllerCapsule)

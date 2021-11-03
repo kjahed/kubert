@@ -6,7 +6,7 @@ import ca.jahed.rtpoet.rtmodel.RTPort
 
 object RTHierarchyUtils {
     fun buildHierarchy(model: RTModel): RTSlot {
-        val topSlot = RTSlot(model.top, 0)
+        val topSlot = RTSlot(model.top!!, 0)
         val slots: List<RTSlot> = buildHierarchy(topSlot)
         calculatePositions(topSlot)
         findNeighbors(slots)

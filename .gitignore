@@ -62,5 +62,6 @@ buildSrcTmp/
 distTmp/
 outTmp/
 .idea/
-github.properties
+gradle.properties
 tmp/
+workspace/
