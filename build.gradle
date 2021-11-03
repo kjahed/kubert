@@ -34,6 +34,14 @@ test {
     useJUnitPlatform()
 }
 
+jar {
+    manifest {
+        attributes 'Main-Class' : 'ca.jahed.kubert.Kubert'
+    }
+    baseName 'kubert'
+    from configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+}
+
 application {
     mainClassName = 'ca.jahed.kubert.Kubert'
 }
