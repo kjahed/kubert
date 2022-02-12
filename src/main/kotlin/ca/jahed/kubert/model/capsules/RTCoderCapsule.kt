@@ -1,10 +1,13 @@
 package ca.jahed.kubert.model.capsules
 
-import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.KubertConfiguration
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
-import ca.jahed.rtpoet.rtmodel.*
+import ca.jahed.rtpoet.rtmodel.RTAction
+import ca.jahed.rtpoet.rtmodel.RTCapsule
+import ca.jahed.rtpoet.rtmodel.RTOperation
+import ca.jahed.rtpoet.rtmodel.RTPort
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTCapsuleProperties
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTFrameProtocol
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTLogProtocol
@@ -13,7 +16,7 @@ import ca.jahed.rtpoet.rtmodel.sm.RTState
 import ca.jahed.rtpoet.rtmodel.sm.RTStateMachine
 import ca.jahed.rtpoet.rtmodel.sm.RTTransition
 
-class RTCoderCapsule(proxyPorts: List<RTPort>)
+class RTCoderCapsule(proxyPorts: List<RTPort>, config: KubertConfiguration)
     : RTCapsule(NameUtils.randomize(RTCoderCapsule::class.java.simpleName)) {
 
     private var numBorderPorts = 0
@@ -70,11 +73,11 @@ class RTCoderCapsule(proxyPorts: List<RTPort>)
             .transition(RTTransition.builder("relaying", "relaying") // proxy -> main
                 .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] got message %s", this->getSlot()->name, rtMessage.payload);
+                    if(${config.debug}) log.log("[%s] got message %s", this->getSlot()->name, rtMessage.payload);
                     UMLRTOutSignal signal;
                     int destPortIdx;
                     UMLRTJSONCoder::fromJSON(rtMessage.payload, signal, getSlot(), &destPortIdx);
-                    if(${Kubert.debug}) log.log("[%s] decoded signal %s", this->getSlot()->name, signal.getName());
+                    if(${config.debug}) log.log("[%s] decoded signal %s", this->getSlot()->name, signal.getName());
                     signal.send();  
                 """.trimIndent())
             )
@@ -84,7 +87,7 @@ class RTCoderCapsule(proxyPorts: List<RTPort>)
                 .action("""
                     char* json = NULL;
                     UMLRTJSONCoder::toJSON(msg, &json);
-                    if(${Kubert.debug}) log.log("[%s] encoded message @%s", this->getSlot()->name, json);
+                    if(${config.debug}) log.log("[%s] encoded message @%s", this->getSlot()->name, json);
                     
                     if(json == NULL) {
                         log.log("[%s] error encoding signal", this->getSlot()->name);

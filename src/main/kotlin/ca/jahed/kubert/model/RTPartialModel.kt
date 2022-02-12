@@ -1,11 +1,10 @@
 package ca.jahed.kubert.model
 
-import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.KubertConfiguration
 import ca.jahed.kubert.model.capsules.*
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.classes.RTFramePortWrapper
 import ca.jahed.kubert.model.protocols.RTControlProtocol
-import ca.jahed.kubert.model.protocols.RTTimingProtocol
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
 import ca.jahed.rtpoet.rtmodel.*
@@ -13,12 +12,17 @@ import ca.jahed.rtpoet.rtmodel.rts.RTSystemSignal
 import ca.jahed.rtpoet.rtmodel.rts.classes.RTSystemClass
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTFrameProtocol
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTSystemProtocol
-import ca.jahed.rtpoet.rtmodel.sm.*
+import ca.jahed.rtpoet.rtmodel.sm.RTPseudoState
+import ca.jahed.rtpoet.rtmodel.sm.RTState
+import ca.jahed.rtpoet.rtmodel.sm.RTTransition
+import ca.jahed.rtpoet.rtmodel.sm.RTTrigger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTBoolean
 import ca.jahed.rtpoet.rtmodel.visitors.RTVisitorListener
 import ca.jahed.rtpoet.utils.RTDeepCopier
 
-class RTPartialModel(private val mainSlot: RTSlot):
+class RTPartialModel(private val mainSlot: RTSlot,
+                     private val config: KubertConfiguration
+):
     RTModel(mainSlot.name, RTCapsulePart(NameUtils.randomize("top"), RTCapsule(NameUtils.randomize("Top")))) {
 
     private val copier = RTDeepCopier(listOf(RTCapsulePart::class.java, RTConnector::class.java))
@@ -51,7 +55,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         // create controller capsule
         val controlProtocol = mainCapsuleControlPort.protocol
         val controllerCapsule = RTControllerCapsule(mainSlot.neighbors.size,
-            controlProtocol, mainCapsuleControlPort.name)
+            controlProtocol, mainCapsuleControlPort.name, config)
 
         capsules.add(mainCapsule)
         capsules.add(controllerCapsule)
@@ -91,7 +95,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
             }
 
             val isServer = mainSlot.k8sName > it.k8sName
-            if(isServer) mainSlot.servicePorts.add(Pair(it.k8sName, Kubert.baseTcpPort + it.position))
+            if(isServer) mainSlot.servicePorts.add(Pair(it.k8sName, config.baseTcpPort + it.position))
         }
 
         // create unconnected children parts
@@ -231,7 +235,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
                         return strcmp(${controlProtocol.smStateParameterName}, "${it.name}") == 0;
                     """.trimIndent())
                     .action("""
-                        if(${Kubert.debug}) printf("[%s] restoring state to ${it.name}", this->getSlot()->name);
+                        if(${config.debug}) printf("[%s] restoring state to ${it.name}", this->getSlot()->name);
                     """.trimIndent())
                     .build()
             )
@@ -278,7 +282,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val partName = if (slot in mainSlot.children) slot.part.name else NameUtils.randomize(slot.part.name)
         val replication = if (slot === mainSlot.parent) 1 else slot.part.replication
 
-        val partBuilder = RTCapsulePart.builder(partName, RTCoderCapsule(ports)).replication(replication)
+        val partBuilder = RTCapsulePart.builder(partName, RTCoderCapsule(ports, config)).replication(replication)
         return partBuilder.build()
     }
 
@@ -292,7 +296,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val portEnvVarPrefix = NameUtils.toLegalEnvVarName("_SERVICE_PORT_$portName")
 
         return RTCapsulePart.builder("communicator",
-            RTTCPCapsule(isServer, mainSlot.index, hostEnvVarPrefix, portEnvVarPrefix))
+            RTTCPCapsule(isServer, mainSlot.index, hostEnvVarPrefix, portEnvVarPrefix, config))
             .optional()
             .build()
     }
@@ -303,7 +307,7 @@ class RTPartialModel(private val mainSlot: RTSlot):
         val pubTopic = "${slotNameTemplate}->${mainSlot.name}"
 
         return RTCapsulePart.builder("communicator",
-            RTMQTTCapsule(pubTopic, subTopic))
+            RTMQTTCapsule(pubTopic, subTopic, config))
             .optional()
             .build()
     }

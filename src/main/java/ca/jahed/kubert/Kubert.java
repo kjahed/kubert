@@ -15,41 +15,62 @@ import java.util.concurrent.Callable;
 public class Kubert implements Callable<Integer> {
 
     @CommandLine.Parameters(index = "0", description = "The UML-RT model to deploy.")
-    public static File inputModel;
+    private static File inputModel;
 
     @CommandLine.Parameters(index = "1..*", description = "Program arguments.")
-    public static List<String> programArgs = new ArrayList<>();
+    private static List<String> programArgs = new ArrayList<>();
 
     @CommandLine.Option(names = {"-o", "--output-dir"}, description = "Output directory for deployment files.")
-    public static File outputDir = new File("output");
+    private static File outputDir = new File("output");
 
     @CommandLine.Option(names = {"-r", "--docker-repo"}, description = "Docker container repository")
-    public static String dockerRepo = "";
+    private static String dockerRepo = "";
 
     @CommandLine.Option(names = {"-n", "--namespace"}, description = "Namespace for Kubernetes resources.")
-    public static String namespace = "kubert";
+    private static String namespace = "kubert";
 
     @CommandLine.Option(names = {"-a", "--app-name"}, description = "Name of the Kubernetes app")
-    public static String appName = "umlrt";
+    private static String appName = "umlrt";
 
     @CommandLine.Option(names = {"-g", "--codegen"}, description = "Path to UML-RT code generator.")
-    public static String codeGenPath = new File(Objects.requireNonNull(Kubert.class.getClassLoader()
+    private static String codeGenPath = new File(Objects.requireNonNull(Kubert.class.getClassLoader()
             .getResource("codegen")).getPath()).getAbsolutePath();
 
     @CommandLine.Option(names = {"-p", "--base-port"}, description = "Base TCP port for proxy capsules")
-    public static int baseTcpPort = 8000;
+    private static int baseTcpPort = 8000;
 
     @CommandLine.Option(names = {"-d", "--debug"}, description = "Generate debug statements")
-    public static boolean debug = true;
+    private static boolean debug = true;
 
-    public static String umlrtArgs = "";
+    private static String umlrtArgs = "";
 
     @Override
-    public Integer call() throws Exception {
+    public Integer call() {
         umlrtArgs = String.join(" ", programArgs);
-        RTModel rtModel = PapyrusRTReader.read(inputModel.getAbsolutePath());
-        ModelTransformer.INSTANCE.transform(rtModel);
+        KubertConfiguration config = new KubertConfiguration();
+        config.setOutputDir(outputDir);
+        config.setDockerRepo(dockerRepo);
+        config.setNamespace(namespace);
+        config.setAppName(appName);
+        config.setCodeGenPath(codeGenPath);
+        config.setBaseTcpPort(baseTcpPort);
+        config.setDebug(debug);
+        config.setUmlrtArgs(umlrtArgs);
+        generate(inputModel, config);
         return 0;
+    }
+
+    public void generate(File umlModel, KubertConfiguration config) {
+        generate(umlModel.getAbsolutePath(), config);
+    }
+
+    public void generate(String umlModel, KubertConfiguration config) {
+        RTModel rtModel = PapyrusRTReader.read(umlModel);
+        generate(rtModel, config);
+    }
+
+    public void generate(RTModel model, KubertConfiguration config) {
+        ModelTransformer.INSTANCE.transform(model, config);
     }
 
     public static void main(String[] args) {

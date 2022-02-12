@@ -1,6 +1,6 @@
 package ca.jahed.kubert.model.capsules
 
-import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.KubertConfiguration
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
@@ -9,11 +9,14 @@ import ca.jahed.rtpoet.rtmodel.cppproperties.RTAttributeProperties
 import ca.jahed.rtpoet.rtmodel.cppproperties.RTCapsuleProperties
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTLogProtocol
 import ca.jahed.rtpoet.rtmodel.rts.protocols.RTTimingProtocol
-import ca.jahed.rtpoet.rtmodel.sm.*
+import ca.jahed.rtpoet.rtmodel.sm.RTPseudoState
+import ca.jahed.rtpoet.rtmodel.sm.RTState
+import ca.jahed.rtpoet.rtmodel.sm.RTStateMachine
+import ca.jahed.rtpoet.rtmodel.sm.RTTransition
 import ca.jahed.rtpoet.rtmodel.types.RTType
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.*
 
-class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, controlPortName: String) :
+class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, controlPortName: String, config: KubertConfiguration) :
     RTCapsule(NameUtils.randomize(RTControllerCapsule::class.java.simpleName)) {
     private val stateFileName = NameUtils.randomize("state");
     private val outQFileName = NameUtils.randomize("outQ");
@@ -135,7 +138,7 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
             .state(RTState.builder("collecting"))
 
             .transition(RTTransition.builder("init", "waitForMainCapsuleBind").action("""
-                if(${Kubert.debug}) log.log("[%s] controller %p starting", this->getSlot()->name, this);
+                if(${config.debug}) log.log("[%s] controller %p starting", this->getSlot()->name, this);
                 this->processing = true;
             """.trimIndent()))
 
@@ -156,7 +159,7 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                         ${restoreStateSignal.parameters.joinToString(",") { it.name }}
                         ).send();
                         
-                        if(${Kubert.debug}) log.log("[%s] decoded state %s", this->getSlot()->name, stateJson);
+                        if(${config.debug}) log.log("[%s] decoded state %s", this->getSlot()->name, stateJson);
                     }
                 """.trimIndent())
             )
@@ -172,7 +175,7 @@ class RTControllerCapsule(numNeighbors: Int, controlProtocol: RTProtocol, contro
                     
                     char * stateJson;
                     jsonCoder.commit(&stateJson);
-                    if(${Kubert.debug}) log.log("[%s] state json @%s", this->getSlot()->name, stateJson);
+                    if(${config.debug}) log.log("[%s] state json @%s", this->getSlot()->name, stateJson);
                     if(stateJson == NULL)
                         log.log("[%s] error encoding state", this->getSlot()->name);
                     else

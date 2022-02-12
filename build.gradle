@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'application'
+    id 'maven-publish'
     id 'org.jetbrains.kotlin.jvm' version '1.4.31'
 }
 
@@ -12,7 +13,7 @@ repositories {
 
     maven {
         name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/kjahed/rtpoet")
+        url = uri("https://maven.pkg.github.com/qumase/rtpoet")
         credentials {
             username = project.findProperty("gpr.user") ?: System.getenv("GH_USER")
             password = project.findProperty("gpr.key") ?: System.getenv("GH_TOKEN")
@@ -24,6 +25,7 @@ dependencies {
     compile 'info.picocli:picocli:4.5.0'
     compile 'ca.jahed.rtpoet:rtpoet:1.0-SNAPSHOT'
     compile 'ca.jahed.rtpoet:rtpoet-papyrusrt:1.0-SNAPSHOT'
+    compile 'ca.jahed.rtpoet:rtpoet-dsl:1.2.0'
 
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
@@ -44,4 +46,57 @@ jar {
 
 application {
     mainClassName = 'ca.jahed.kubert.Kubert'
+}
+
+publishing {
+    repositories {
+        mavenLocal()
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/qumase/kubert")
+            credentials {
+                username = project.findProperty("gpr.user") ?: System.getenv("GH_USER")
+                password = project.findProperty("gpr.key") ?: System.getenv("GH_TOKEN")
+            }
+        }
+    }
+
+    publications {
+        mvn(MavenPublication) {
+            from components.java
+            groupId = 'ca.jahed.kubert'
+            artifactId = 'kubert'
+            versionMapping {
+                usage("java-api") {
+                    fromResolutionOf("runtimeClasspath")
+                }
+                usage("java-runtime") {
+                    fromResolutionResult()
+                }
+            }
+            pom {
+                name = "KubeRT"
+                description = "Deploy UML-RT models on a Kubernetes cluster"
+                url = "https://github.com/qumase/kubert"
+                licenses {
+                    license {
+                        name = "The Apache License, Version 2.0"
+                        url = "http://www.apache.org/licenses/LICENSE-2.0.txt"
+                    }
+                }
+                developers {
+                    developer {
+                        id = "kjahed"
+                        name = "Karim Jahed"
+                        email = "jahed@cs.queensu.ca"
+                    }
+                }
+                scm {
+                    connection = "scm:git:git://github.com/qumase/kubert.git"
+                    developerConnection = "scm:git:ssh://github.com/qumase/kubert.git"
+                    url = "https://github.com/qumase/kubert/"
+                }
+            }
+        }
+    }
 }

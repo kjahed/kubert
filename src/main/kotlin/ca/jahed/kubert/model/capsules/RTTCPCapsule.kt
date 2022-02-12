@@ -1,6 +1,6 @@
 package ca.jahed.kubert.model.capsules
 
-import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.KubertConfiguration
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
@@ -20,7 +20,9 @@ import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 class RTTCPCapsule(isServer: Boolean,
                    slotIndex: Int,
                    hostEnvVarPrefix: String,
-                   portEnvVarPrefix: String)
+                   portEnvVarPrefix: String,
+                   config: KubertConfiguration
+)
     : RTCapsule(NameUtils.randomize(RTTCPCapsule::class.java.simpleName)) {
 
     init {
@@ -80,13 +82,13 @@ class RTTCPCapsule(isServer: Boolean,
                 this->port = this->getPort();
             
                 if(this->isServer) {
-                    if(${Kubert.debug}) log.log("[%s] listening %d", this->getSlot()->name, this->port);
+                    if(${config.debug}) log.log("[%s] listening %d", this->getSlot()->name, this->port);
                     tcpServer.listen(this->port);
                     tcpServer.accept();
                 }
                 else {
                     this->remoteHost = this->getHost();
-                    if(${Kubert.debug}) log.log("[%s] connecting to service %s:%d", this->getSlot()->name, this->remoteHost, this->port);
+                    if(${config.debug}) log.log("[%s] connecting to service %s:%d", this->getSlot()->name, this->remoteHost, this->port);
                     tcp.connect(this->remoteHost, this->port);   
                 }
             """.trimIndent()))
@@ -120,7 +122,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connecting", "connected")
                 .trigger("(tcp|tcpServer)", "connected")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] connected", this->getSlot()->name);
+                    if(${config.debug}) log.log("[%s] connected", this->getSlot()->name);
                     if($isServer) tcp.attach(sockfd);
                     relay.recall();
                 """.trimIndent())
@@ -129,7 +131,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connecting", "error")
                 .trigger("tcp", "error")
                 .action("""
-                    if(${Kubert.debug} && errno != 111)
+                    if(${config.debug} && errno != 111)
                         log.log("[%s] connection error: %d", this->getSlot()->name, errno);
                     timer.informIn(UMLRTTimespec(1,0));
                 """.trimIndent())
@@ -145,7 +147,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("tcp", "received")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] received message %s", this->getSlot()->name, payload);
+                    if(${config.debug}) log.log("[%s] received message %s", this->getSlot()->name, payload);
                     ${RTExtMessage.name} rtMessage = { strdup(payload) };
                     relay.relay(rtMessage).send();
                 """.trimIndent())
@@ -154,7 +156,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connected", "connecting")
                 .trigger("tcp", "disconnected")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] tcp disconnected", this->getSlot()->name);
+                    if(${config.debug}) log.log("[%s] tcp disconnected", this->getSlot()->name);
                     this->onInit();
                 """.trimIndent())
             )
@@ -162,7 +164,7 @@ class RTTCPCapsule(isServer: Boolean,
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
+                    if(${config.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
                     if(!tcp.send(rtMessage.payload))
                         log.log("[%s] error sending message", this->getSlot()->name);
                 """.trimIndent())

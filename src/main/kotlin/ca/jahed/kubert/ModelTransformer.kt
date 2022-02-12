@@ -1,70 +1,69 @@
 package ca.jahed.kubert
 
-import ca.jahed.kubert.utils.RTHierarchyUtils
 import ca.jahed.kubert.model.RTPartialModel
 import ca.jahed.kubert.model.RTSlot
+import ca.jahed.kubert.utils.RTHierarchyUtils
 import ca.jahed.rtpoet.papyrusrt.PapyrusRTWriter
 import ca.jahed.rtpoet.papyrusrt.rts.PapyrusRTLibrary
-import ca.jahed.rtpoet.rtmodel.*
+import ca.jahed.rtpoet.rtmodel.RTModel
 import org.eclipse.emf.common.util.URI
 import org.eclipse.emf.ecore.xmi.XMIResource
 import java.io.File
 import java.io.PrintWriter
 
 object ModelTransformer {
-    fun transform(model: RTModel) {
+    fun transform(model: RTModel, config: KubertConfiguration) {
         val topSlot = RTHierarchyUtils.buildHierarchy(model)
-        val slots = processSlot(topSlot)
+        val slots = processSlot(topSlot, config)
 
-        val mqttDir = File(Kubert.outputDir, "mqtt")
-        mqttDir.mkdirs()
+//        val mqttDir = File(config.outputDir, "mqtt")
+//        mqttDir.mkdirs()
+//        writeToFile(mqttConfigMap(config), File(mqttDir, "configmap.yaml"))
+//        writeToFile(mqttDeployment(config), File(mqttDir, "deployment.yaml"))
+//        writeToFile(mqttService(config), File(mqttDir, "service.yaml"))
+//        writeToFile(mqttGradleScript(config), File(mqttDir, "build.gradle"))
 
-        writeToFile(mqttConfigMap(), File(mqttDir, "configmap.yaml"))
-        writeToFile(mqttDeployment(), File(mqttDir, "deployment.yaml"))
-        writeToFile(mqttService(), File(mqttDir, "service.yaml"))
-        writeToFile(mqttGradleScript(), File(mqttDir, "build.gradle"))
-
-        writeToFile(gradleSettingsFile(slots), File(Kubert.outputDir, "settings.gradle"))
-        writeToFile(gradlePropertiesFile(), File(Kubert.outputDir, "gradle.properties"))
-        writeToFile(gradleRootScript(), File(Kubert.outputDir, "build.gradle"))
-        writeToFile(nameSpaceFile(), File(Kubert.outputDir, "namespace.yaml"))
-        writeToFile(volumeFile(), File(Kubert.outputDir, "volume.yaml"))
-        writeToFile(rolesFile(), File(Kubert.outputDir, "roles.yaml"))
+        writeToFile(gradleSettingsFile(slots, config), File(config.outputDir, "settings.gradle"))
+        writeToFile(gradlePropertiesFile(config), File(config.outputDir, "gradle.properties"))
+        writeToFile(gradleRootScript(config), File(config.outputDir, "build.gradle"))
+        writeToFile(nameSpaceFile(config), File(config.outputDir, "namespace.yaml"))
+        writeToFile(volumeFile(config), File(config.outputDir, "volume.yaml"))
+        writeToFile(rolesFile(config), File(config.outputDir, "roles.yaml"))
     }
 
-    private fun processSlot(slot: RTSlot): List<RTSlot> {
+    private fun processSlot(slot: RTSlot, config: KubertConfiguration): List<RTSlot> {
         val slots = mutableListOf<RTSlot>()
         for (child in slot.children)
-            slots.addAll(processSlot(child))
+            slots.addAll(processSlot(child, config))
 
         if (slot.part.capsule.stateMachine == null) return slots
 
-        val outputDir = File(Kubert.outputDir, slot.name)
+        val outputDir = File(config.outputDir, slot.name)
         outputDir.mkdirs()
 
-        val partialModel = RTPartialModel(slot)
+        val partialModel = RTPartialModel(slot, config)
         val resource = PapyrusRTLibrary.createResourceSet()
             .createResource(URI.createFileURI(File(outputDir, "model.uml").absolutePath))
         PapyrusRTWriter.write(resource, partialModel)
         (resource as XMIResource).eObjectToIDMap.clear()
         resource.save(null)
 
-        writeToFile(dockerFile(partialModel), File(outputDir, "Dockerfile"))
-        writeToFile(deploymentFile(slot), File(outputDir, "deployment.yaml"))
-        writeToFile(gradleScript(slot), File(outputDir, "build.gradle"))
-        if (slot.servicePorts.isNotEmpty()) writeToFile(serviceFile(slot), File(outputDir, "service.yaml"))
+        writeToFile(dockerFile(partialModel, config), File(outputDir, "Dockerfile"))
+        writeToFile(deploymentFile(slot, config), File(outputDir, "deployment.yaml"))
+        writeToFile(gradleScript(slot, config), File(outputDir, "build.gradle"))
+        if (slot.servicePorts.isNotEmpty()) writeToFile(serviceFile(slot, config), File(outputDir, "service.yaml"))
 
         slots.add(slot)
         return slots
     }
 
-    private fun mqttConfigMap(): String {
+    private fun mqttConfigMap(config: KubertConfiguration): String {
         return """
             apiVersion: v1
             kind: ConfigMap
             metadata:
               name: mosquitto-config
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
             data:
               mosquitto.conf: |-
                 # Ip/hostname to listen to.
@@ -85,13 +84,13 @@ object ModelTransformer {
         """.trimIndent()
     }
 
-    private fun mqttDeployment(): String {
+    private fun mqttDeployment(config: KubertConfiguration): String {
         return """
             apiVersion: apps/v1
             kind: Deployment
             metadata:
               name: mosquitto
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
             spec:
               selector:
                 matchLabels:
@@ -117,13 +116,13 @@ object ModelTransformer {
         """.trimIndent()
     }
 
-    private fun mqttService(): String {
+    private fun mqttService(config: KubertConfiguration): String {
         return """
             apiVersion: v1
             kind: Service
             metadata:
               name: mqtt
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
             spec:
               selector:
                 app: mosquitto
@@ -133,7 +132,7 @@ object ModelTransformer {
         """.trimIndent()
     }
 
-    private fun mqttGradleScript(): String {
+    private fun mqttGradleScript(config: KubertConfiguration): String {
         return """
             plugins {
                 id 'java'
@@ -160,17 +159,17 @@ object ModelTransformer {
         """.trimIndent()
     }
 
-    private fun dockerFile(model: RTModel): String {
+    private fun dockerFile(model: RTModel, config: KubertConfiguration): String {
         return """
-            FROM ${Kubert.dockerRepo}umlrt-rts:1.0
+            FROM ${config.dockerRepo}umlrt-rts:1.0
             COPY ./cpp/src /app
             WORKDIR /app
             RUN make
-            ENTRYPOINT flock -n /var/lock/app.lock /app/${model.top!!.capsule.name}Main ${Kubert.umlrtArgs} 2>&1 | tee logfile
+            ENTRYPOINT flock -n /var/lock/app.lock /app/${model.top!!.capsule.name}Main ${config.umlrtArgs} 2>&1 | tee logfile
         """.trimIndent()
     }
 
-    private fun deploymentFile(slot: RTSlot): String {
+    private fun deploymentFile(slot: RTSlot, config: KubertConfiguration): String {
         val parent = findParentBehavior(slot)
         return """
             ---
@@ -178,9 +177,9 @@ object ModelTransformer {
             kind: Deployment
             metadata:
               name: ${slot.k8sName}
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
               labels:
-                app: ${Kubert.appName}
+                app: ${config.appName}
                 parent: ${if(parent != null) """ "${parent.k8sName}" """ else """ "" """}
                 optional: "${slot.part.optional}"
                 
@@ -193,18 +192,18 @@ object ModelTransformer {
                 metadata:
                   labels:
                     name: ${slot.k8sName}
-                    app: ${Kubert.appName}
+                    app: ${config.appName}
                 spec:
                   volumes:
-                    - name: ${Kubert.namespace}
+                    - name: ${config.namespace}
                       persistentVolumeClaim:
-                        claimName: ${Kubert.namespace}
+                        claimName: ${config.namespace}
                   containers:
                     - name: ${slot.k8sName}
-                      image: ${Kubert.dockerRepo}${slot.k8sName}
+                      image: ${config.dockerRepo}${slot.k8sName}
                       volumeMounts:
                         - mountPath: "/data"
-                          name: ${Kubert.namespace}
+                          name: ${config.namespace}
                       ${
             if (slot.children.isNotEmpty()) """
                       lifecycle:
@@ -237,16 +236,16 @@ object ModelTransformer {
             """.trimIndent()
     }
 
-    private fun serviceFile(slot: RTSlot): String {
+    private fun serviceFile(slot: RTSlot, config: KubertConfiguration): String {
         return """
             ---
             apiVersion: v1
             kind: Service
             metadata:
               name: ${slot.k8sName}
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
               labels:
-                app: ${Kubert.appName}
+                app: ${config.appName}
             spec:
               selector:
                 name: ${slot.k8sName}
@@ -264,7 +263,7 @@ object ModelTransformer {
             """.trimIndent()
     }
 
-    private fun gradleScript(slot: RTSlot): String {
+    private fun gradleScript(slot: RTSlot, config: KubertConfiguration): String {
         return """
             plugins {
                 id 'java'
@@ -289,8 +288,8 @@ object ModelTransformer {
             task generate(type:JavaExec) {
                 inputs.files 'model.uml'
                 outputs.dir 'cpp'
-                classpath = files("${Kubert.codeGenPath}/bin/umlrtgen.jar")
-                args '-l', 'SEVERE', '-p', '${Kubert.codeGenPath}/plugins', '-o', './cpp', './model.uml'
+                classpath = files("${config.codeGenPath}/bin/umlrtgen.jar")
+                args '-l', 'SEVERE', '-p', '${config.codeGenPath}/plugins', '-o', './cpp', './model.uml'
             }
         
             task containerize(type:Exec) {
@@ -298,7 +297,7 @@ object ModelTransformer {
                 inputs.dir 'cpp'
                 inputs.files 'Dockerfile'
                 outputs.files '.image'
-                commandLine 'docker', 'build', '--label', 'namespace=${Kubert.namespace}', '-q', '-t', '${Kubert.dockerRepo}${slot.k8sName}', '.'
+                commandLine 'docker', 'build', '--label', 'namespace=${config.namespace}', '-q', '-t', '${config.dockerRepo}${slot.k8sName}', '.'
                 standardOutput new ByteArrayOutputStream()
         
                 doLast {
@@ -310,7 +309,7 @@ object ModelTransformer {
                 dependsOn 'containerize'
                 inputs.files '.image'
                 outputs.files '.push'
-                commandLine 'docker', 'push', '-q', '${Kubert.dockerRepo}${slot.k8sName}'
+                commandLine 'docker', 'push', '-q', '${config.dockerRepo}${slot.k8sName}'
         
                 doLast {
                     file('.push').text = file('.image').text
@@ -351,7 +350,7 @@ object ModelTransformer {
         
             task monitor(type:KeepTryingExec) {
                 dependsOn 'deploy'
-                commandLine 'kubectl', 'logs', '--namespace', '${Kubert.namespace}', '--tail', '-1', '-lname=${slot.k8sName}', '-f'
+                commandLine 'kubectl', 'logs', '--namespace', '${config.namespace}', '--tail', '-1', '-lname=${slot.k8sName}', '-f'
             }
         
             task deleteImage {
@@ -381,21 +380,21 @@ object ModelTransformer {
             """.trimIndent()
     }
 
-    private fun gradleSettingsFile(slots: List<RTSlot>): String {
+    private fun gradleSettingsFile(slots: List<RTSlot>, config: KubertConfiguration): String {
         return """
-            rootProject.name = '${Kubert.namespace}'
+            rootProject.name = '${config.namespace}'
             include 'mqtt',${slots.joinToString(separator = ",") { "'" + it.name + "'" }}
         """.trimIndent()
     }
 
-    private fun gradlePropertiesFile(): String {
+    private fun gradlePropertiesFile(config: KubertConfiguration): String {
         return """
             org.gradle.parallel=true
             org.gradle.workers.max=4
         """.trimIndent()
     }
 
-    private fun gradleRootScript(): String {
+    private fun gradleRootScript(config: KubertConfiguration): String {
         return """
             plugins {
                 id 'java'
@@ -410,7 +409,7 @@ object ModelTransformer {
                         commandLine 'kubectl', 'apply', '-f', 'namespace.yaml'
                     }
             
-                    file('.namespace').text = '${Kubert.namespace}'
+                    file('.namespace').text = '${config.namespace}'
                 }
             }
             
@@ -424,7 +423,7 @@ object ModelTransformer {
                         commandLine 'kubectl', 'apply', '-f', 'roles.yaml'
                     }
             
-                    file('.roles').text = '${Kubert.namespace}'
+                    file('.roles').text = '${config.namespace}'
                 }
             }
             
@@ -441,7 +440,7 @@ object ModelTransformer {
                         commandLine 'kubectl', 'apply', '-f', 'volume.yaml'
                     }
             
-                    file('.volume').text = '${Kubert.namespace}'
+                    file('.volume').text = '${config.namespace}'
                 }
             }
             
@@ -451,26 +450,26 @@ object ModelTransformer {
             
             task run(type:Exec) {
                 dependsOn 'deploy'
-                commandLine 'kubectl', '--namespace', '${Kubert.namespace}', 'scale', 'deployment', '-lparent=', '--replicas=1'
+                commandLine 'kubectl', '--namespace', '${config.namespace}', 'scale', 'deployment', '-lparent=', '--replicas=1'
             }
             
             task stop(type:Exec) {
-                commandLine 'kubectl', '--namespace', '${Kubert.namespace}', 'scale', 'deployment', '-lapp=${Kubert.appName}', '--replicas=0'
+                commandLine 'kubectl', '--namespace', '${config.namespace}', 'scale', 'deployment', '-lapp=${config.appName}', '--replicas=0'
                 ignoreExitValue true
             }
             
             task monitorAll(type:Exec) {
                 dependsOn 'deploy'
-                commandLine 'kubectl', 'logs', '--namespace', '${Kubert.namespace}', '--tail', '-1', '--max-log-requests', '1000', '-lapp=${Kubert.appName}', '-f'
+                commandLine 'kubectl', 'logs', '--namespace', '${config.namespace}', '--tail', '-1', '--max-log-requests', '1000', '-lapp=${config.appName}', '-f'
             }
             
             task logs(type:Exec) {
                 dependsOn 'deploy'
-                commandLine 'kubectl', 'logs', '--namespace', '${Kubert.namespace}', '--tail', '-1', '--max-log-requests', '1000', '-lapp=${Kubert.appName}'
+                commandLine 'kubectl', 'logs', '--namespace', '${config.namespace}', '--tail', '-1', '--max-log-requests', '1000', '-lapp=${config.appName}'
             }
                    
             task deleteNamespace(type:Exec) {
-                commandLine 'kubectl', 'delete', 'namespaces', '${Kubert.namespace}'
+                commandLine 'kubectl', 'delete', 'namespaces', '${config.namespace}'
                 ignoreExitValue true
             
                 doLast {
@@ -481,7 +480,7 @@ object ModelTransformer {
             task deleteVolume(type:Exec) {
                 dependsOn 'deleteNamespace'
             
-                commandLine 'kubectl', 'delete', 'pv', '${Kubert.namespace}'
+                commandLine 'kubectl', 'delete', 'pv', '${config.namespace}'
                 ignoreExitValue true
             
                 doLast {
@@ -496,7 +495,7 @@ object ModelTransformer {
             task pruneImages() {
                 doLast {
                     exec {
-                        commandLine 'docker', 'image', 'prune', '-a', '-f', '--filter', 'label=namespace=${Kubert.namespace}'
+                        commandLine 'docker', 'image', 'prune', '-a', '-f', '--filter', 'label=namespace=${config.namespace}'
                         ignoreExitValue true
                     }
                 }
@@ -510,29 +509,29 @@ object ModelTransformer {
         """.trimIndent()
     }
 
-    private fun nameSpaceFile(): String {
+    private fun nameSpaceFile(config: KubertConfiguration): String {
         return """
             ---
             apiVersion: v1
             kind: Namespace
             metadata:
-              name: ${Kubert.namespace}
+              name: ${config.namespace}
         """.trimIndent()
     }
 
-    private fun volumeFile(): String {
+    private fun volumeFile(config: KubertConfiguration): String {
         return """
             apiVersion: storage.k8s.io/v1
             kind: StorageClass
             metadata:
-              name: ${Kubert.namespace}
+              name: ${config.namespace}
             provisioner: docker.io/hostpath
             reclaimPolicy: Delete
             ---
             apiVersion: v1
             kind: PersistentVolume
             metadata:
-              name: ${Kubert.namespace}
+              name: ${config.namespace}
               labels:
                 type: local
             spec:
@@ -547,8 +546,8 @@ object ModelTransformer {
             apiVersion: v1
             kind: PersistentVolumeClaim
             metadata:
-              name: ${Kubert.namespace}
-              namespace: ${Kubert.namespace}
+              name: ${config.namespace}
+              namespace: ${config.namespace}
             spec:
               storageClassName: manual
               accessModes:
@@ -556,16 +555,16 @@ object ModelTransformer {
               resources:
                 requests:
                   storage: 1Gi
-              storageClassName: ${Kubert.namespace}
+              storageClassName: ${config.namespace}
         """.trimIndent()
     }
 
-    private fun rolesFile(): String {
+    private fun rolesFile(config: KubertConfiguration): String {
         return """
             apiVersion: rbac.authorization.k8s.io/v1
             kind: Role
             metadata:
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
               name: reader
             rules:
             - apiGroups: ["", "apps", "extensions"]
@@ -577,7 +576,7 @@ object ModelTransformer {
             kind: RoleBinding
             metadata:
               name: read
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
             subjects:
             - kind: ServiceAccount
               name: default
@@ -590,7 +589,7 @@ object ModelTransformer {
             apiVersion: rbac.authorization.k8s.io/v1
             kind: Role
             metadata:
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
               name: scaler
             rules:
               - apiGroups: ["", "apps", "extensions"]
@@ -602,7 +601,7 @@ object ModelTransformer {
             kind: RoleBinding
             metadata:
               name: scale
-              namespace: ${Kubert.namespace}
+              namespace: ${config.namespace}
             subjects:
               - kind: ServiceAccount
                 name: default

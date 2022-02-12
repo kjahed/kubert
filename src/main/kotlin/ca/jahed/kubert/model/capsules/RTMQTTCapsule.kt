@@ -1,6 +1,6 @@
 package ca.jahed.kubert.model.capsules
 
-import ca.jahed.kubert.Kubert
+import ca.jahed.kubert.KubertConfiguration
 import ca.jahed.kubert.model.classes.RTExtMessage
 import ca.jahed.kubert.model.protocols.RTRelayProtocol
 import ca.jahed.kubert.utils.NameUtils
@@ -16,7 +16,7 @@ import ca.jahed.rtpoet.rtmodel.sm.RTTransition
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTInteger
 import ca.jahed.rtpoet.rtmodel.types.primitivetype.RTString
 
-class RTMQTTCapsule(pubTopic: String, subTopic: String)
+class RTMQTTCapsule(pubTopic: String, subTopic: String, config: KubertConfiguration)
     : RTCapsule(NameUtils.randomize(RTMQTTCapsule::class.java.simpleName)) {
     private val sessionID = NameUtils.randomString(8)
 
@@ -72,7 +72,7 @@ class RTMQTTCapsule(pubTopic: String, subTopic: String)
             .state(RTState.builder("connecting"))
             .state(RTState.builder("connected"))
             .state(RTState.builder("error").entry("""
-                if(${Kubert.debug}) log.log("[%s] connection error", this->getSlot()->name);
+                if(${config.debug}) log.log("[%s] connection error", this->getSlot()->name);
                 timer.informIn(UMLRTTimespec(1,0));
             """.trimIndent()))
 
@@ -85,12 +85,12 @@ class RTMQTTCapsule(pubTopic: String, subTopic: String)
             .transition(RTTransition.builder("waitForControllerBind", "connecting")
                 .trigger("relay", "rtBound")
                 .action("""
-                    this->host = "mqtt.${Kubert.namespace}.svc.cluster.local";
+                    this->host = "mqtt.${config.namespace}.svc.cluster.local";
                     this->port = 1883;
                     this->pubTopic = this->getPubTopic();
                     this->subTopic = this->getSubTopic();
-                    if(${Kubert.debug}) log.log("[%s] pubtopic: %s", this->getSlot()->name, this->pubTopic);
-                    if(${Kubert.debug}) log.log("[%s] subtopic: %s", this->getSlot()->name, this->subTopic);
+                    if(${config.debug}) log.log("[%s] pubtopic: %s", this->getSlot()->name, this->pubTopic);
+                    if(${config.debug}) log.log("[%s] subtopic: %s", this->getSlot()->name, this->subTopic);
                     mqtt.connect(this->host, this->port, NULL, NULL, "$sessionID");
                 """.trimIndent())
             )
@@ -113,7 +113,7 @@ class RTMQTTCapsule(pubTopic: String, subTopic: String)
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("mqtt", "received")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] got message %s", this->getSlot()->name, payload);
+                    if(${config.debug}) log.log("[%s] got message %s", this->getSlot()->name, payload);
                     ${RTExtMessage.name} rtMessage = { strdup(payload) };
                     relay.relay(rtMessage).send();
                 """.trimIndent())
@@ -122,7 +122,7 @@ class RTMQTTCapsule(pubTopic: String, subTopic: String)
             .transition(RTTransition.builder("connected", "connected")
                 .trigger("relay", "relay")
                 .action("""
-                    if(${Kubert.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
+                    if(${config.debug}) log.log("[%s] sending message @%s", this->getSlot()->name, rtMessage.payload);
                     mqtt.publish(this->pubTopic, rtMessage.payload);
                 """.trimIndent())
             )
