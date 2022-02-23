@@ -27,7 +27,7 @@ Deploy UML-RT models to Kubernetes clusters.
 
 ### Example
 ```
-Kubert -g /full/path/to/codegen -r kjahed/ -o output ParcelRouter.uml -- -u 100 1 1 1 1
+Kubert ParcelRouter.uml -- -u 100 1 1 1 1
 
 cd output
 gradle generate  # generate code
