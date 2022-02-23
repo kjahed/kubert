@@ -15,48 +15,41 @@ import java.util.concurrent.Callable;
 public class Kubert implements Callable<Integer> {
 
     @CommandLine.Parameters(index = "0", description = "The UML-RT model to deploy.")
-    private static File inputModel;
+    protected static File inputModel;
 
     @CommandLine.Parameters(index = "1..*", description = "Program arguments.")
-    private static List<String> programArgs = new ArrayList<>();
+    protected static List<String> programArgs = new ArrayList<>();
 
     @CommandLine.Option(names = {"-o", "--output-dir"}, description = "Output directory for deployment files.")
-    private static File outputDir = new File("output");
+    protected static File outputDir = new File("output");
 
-    @CommandLine.Option(names = {"-r", "--docker-repo"}, description = "Docker container repository")
-    private static String dockerRepo = "";
+    @CommandLine.Option(names = {"-r", "--docker-repo"}, description = "Docker repository for generated containers")
+    protected static String dockerRepo = "";
+
+    @CommandLine.Option(names = {"-i", "--image"}, description = "Base Docker image for all generated containers")
+    protected static String dockerBaseImage = "kjahed/umlrt-rts:1.0";
 
     @CommandLine.Option(names = {"-n", "--namespace"}, description = "Namespace for Kubernetes resources.")
-    private static String namespace = "kubert";
+    protected static String namespace = "kubert";
 
     @CommandLine.Option(names = {"-a", "--app-name"}, description = "Name of the Kubernetes app")
-    private static String appName = "umlrt";
+    protected static String appName = "umlrt";
 
     @CommandLine.Option(names = {"-g", "--codegen"}, description = "Path to UML-RT code generator.")
-    private static String codeGenPath = new File(Objects.requireNonNull(Kubert.class.getClassLoader()
+    protected static String codeGenPath = new File(Objects.requireNonNull(Kubert.class.getClassLoader()
             .getResource("codegen")).getPath()).getAbsolutePath();
 
     @CommandLine.Option(names = {"-p", "--base-port"}, description = "Base TCP port for proxy capsules")
-    private static int baseTcpPort = 8000;
+    protected static int baseTcpPort = 8000;
 
     @CommandLine.Option(names = {"-d", "--debug"}, description = "Generate debug statements")
-    private static boolean debug = true;
+    protected static boolean debug = true;
 
-    private static String umlrtArgs = "";
+    protected static String umlrtArgs = "";
 
     @Override
     public Integer call() {
-        umlrtArgs = String.join(" ", programArgs);
-        KubertConfiguration config = new KubertConfiguration();
-        config.setOutputDir(outputDir);
-        config.setDockerRepo(dockerRepo);
-        config.setNamespace(namespace);
-        config.setAppName(appName);
-        config.setCodeGenPath(codeGenPath);
-        config.setBaseTcpPort(baseTcpPort);
-        config.setDebug(debug);
-        config.setUmlrtArgs(umlrtArgs);
-        generate(inputModel, config);
+        generate(inputModel, new KubertConfiguration());
         return 0;
     }
 

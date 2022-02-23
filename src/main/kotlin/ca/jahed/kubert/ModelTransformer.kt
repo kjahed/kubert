@@ -161,7 +161,7 @@ object ModelTransformer {
 
     private fun dockerFile(model: RTModel, config: KubertConfiguration): String {
         return """
-            FROM ${config.dockerRepo}umlrt-rts:1.0
+            FROM ${config.dockerBaseImage}
             COPY ./cpp/src /app
             WORKDIR /app
             RUN make

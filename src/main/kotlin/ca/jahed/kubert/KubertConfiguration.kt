@@ -1,14 +1,13 @@
 package ca.jahed.kubert
 
-import java.io.File
-
 class KubertConfiguration {
-    var outputDir = File("output");
-    var dockerRepo = "";
-    var namespace = "kubert";
-    var appName = "umlrt";
-    var codeGenPath = "codegen"
-    var baseTcpPort = 8000;
-    var debug = true;
-    var umlrtArgs = "";
+    var outputDir = Kubert.outputDir
+    var dockerRepo = Kubert.dockerRepo
+    var dockerBaseImage = Kubert.dockerBaseImage
+    var namespace = Kubert.namespace
+    var appName = Kubert.appName
+    var codeGenPath = Kubert.codeGenPath
+    var baseTcpPort = Kubert.baseTcpPort
+    var debug = Kubert.debug
+    var umlrtArgs = Kubert.programArgs.joinToString(" ")
 }
