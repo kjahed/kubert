@@ -2,7 +2,7 @@
 
 ### Usage
 ```
-ca.jahed.kubert.kubert [-dhV] [-a=<appName>] [-g=<codeGenPath>]
+Kubert [-dhV] [-a=<appName>] [-g=<codeGenPath>]
                               [-n=<namespace>] [-o=<outputDir>]
                               [-p=<baseTcpPort>] [-r=<dockerRepo>] <inputModel>
                               [<programArgs>...]
