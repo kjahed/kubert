@@ -25,6 +25,7 @@ dependencies {
     compile 'info.picocli:picocli:4.5.0'
     compile 'ca.jahed.rtpoet:rtpoet:1.0-SNAPSHOT'
     compile 'ca.jahed.rtpoet:rtpoet-papyrusrt:1.0-SNAPSHOT'
+    compile 'ca.jahed.rtpoet:rtpoet-dsl:1.2.0'
 
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
@@ -40,7 +41,6 @@ jar {
         attributes 'Main-Class' : 'ca.jahed.kubert.Kubert'
     }
     baseName 'kubert'
-    from configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
 }
 
 application {

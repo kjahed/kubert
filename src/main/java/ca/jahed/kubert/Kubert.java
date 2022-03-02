@@ -1,7 +1,15 @@
 package ca.jahed.kubert;
 
+import ca.jahed.rtpoet.dsl.RtStandaloneSetup;
+import ca.jahed.rtpoet.dsl.generator.RTModelGenerator;
+import ca.jahed.rtpoet.dsl.rt.Model;
 import ca.jahed.rtpoet.papyrusrt.PapyrusRTReader;
 import ca.jahed.rtpoet.rtmodel.RTModel;
+import com.google.inject.Injector;
+import org.eclipse.emf.common.util.URI;
+import org.eclipse.emf.ecore.resource.Resource;
+import org.eclipse.xtext.resource.XtextResource;
+import org.eclipse.xtext.resource.XtextResourceSet;
 import picocli.CommandLine;
 
 import java.io.File;
@@ -45,6 +53,9 @@ public class Kubert implements Callable<Integer> {
     @CommandLine.Option(names = {"-d", "--debug"}, description = "Generate debug statements")
     protected static boolean debug = true;
 
+    @CommandLine.Option(names = {"-t", "--rt"}, description = "Input is an RTModel in textual notation")
+    protected static boolean rt = false;
+
     protected static String umlrtArgs = "";
 
     @Override
@@ -58,7 +69,16 @@ public class Kubert implements Callable<Integer> {
     }
 
     public void generate(String umlModel, KubertConfiguration config) {
-        RTModel rtModel = PapyrusRTReader.read(umlModel);
+        RTModel rtModel;
+        if(config.getTextual()) {
+            Injector injector = new RtStandaloneSetup().createInjectorAndDoEMFRegistration();
+            XtextResourceSet resourceSet = injector.getInstance(XtextResourceSet.class);
+            resourceSet.addLoadOption(XtextResource.OPTION_RESOLVE_ALL, Boolean.TRUE);
+            Resource resource = resourceSet.getResource(URI.createURI(inputModel.getAbsolutePath()), true);
+            rtModel = new RTModelGenerator().doGenerate(resource);
+        } else {
+            rtModel = PapyrusRTReader.read(umlModel);
+        }
         generate(rtModel, config);
     }
 

@@ -9,5 +9,6 @@ class KubertConfiguration {
     var codeGenPath = Kubert.codeGenPath
     var baseTcpPort = Kubert.baseTcpPort
     var debug = Kubert.debug
+    var textual = Kubert.rt
     var umlrtArgs = Kubert.programArgs.joinToString(" ")
 }
