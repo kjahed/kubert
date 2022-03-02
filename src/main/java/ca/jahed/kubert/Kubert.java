@@ -2,7 +2,6 @@ package ca.jahed.kubert;
 
 import ca.jahed.rtpoet.dsl.RtStandaloneSetup;
 import ca.jahed.rtpoet.dsl.generator.RTModelGenerator;
-import ca.jahed.rtpoet.dsl.rt.Model;
 import ca.jahed.rtpoet.papyrusrt.PapyrusRTReader;
 import ca.jahed.rtpoet.rtmodel.RTModel;
 import com.google.inject.Injector;
@@ -43,15 +42,14 @@ public class Kubert implements Callable<Integer> {
     @CommandLine.Option(names = {"-a", "--app-name"}, description = "Name of the Kubernetes app")
     protected static String appName = "umlrt";
 
-    @CommandLine.Option(names = {"-g", "--codegen"}, description = "Path to UML-RT code generator.")
-    protected static String codeGenPath = new File(Objects.requireNonNull(Kubert.class.getClassLoader()
-            .getResource("codegen")).getPath()).getAbsolutePath();
+    @CommandLine.Option(names = {"-g", "--codegen"}, required = true, description = "Path to UML-RT code generator.")
+    protected static String codeGenPath = "";
 
     @CommandLine.Option(names = {"-p", "--base-port"}, description = "Base TCP port for proxy capsules")
     protected static int baseTcpPort = 8000;
 
     @CommandLine.Option(names = {"-d", "--debug"}, description = "Generate debug statements")
-    protected static boolean debug = true;
+    protected static boolean debug = false;
 
     @CommandLine.Option(names = {"-t", "--rt"}, description = "Input is an RTModel in textual notation")
     protected static boolean rt = false;
